@@ -27,3 +27,6 @@ go.work.sum
 
 # Local lock file
 skills-lock.json
+
+# Agent registry artifacts
+.atl/
