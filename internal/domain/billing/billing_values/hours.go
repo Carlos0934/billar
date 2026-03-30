@@ -9,8 +9,8 @@ type Hours struct {
 }
 
 func NewHours(value int64) (Hours, error) {
-	if value < 0 {
-		return Hours{}, ErrHoursNegative
+	if value <= 0 {
+		return Hours{}, ErrHoursMustBePositive
 	}
 
 	return Hours{value: value}, nil
@@ -22,6 +22,10 @@ func (hours Hours) Value() int64 {
 
 func (hours Hours) IsZero() bool {
 	return hours.value == 0
+}
+
+func (hours Hours) IsPositive() bool {
+	return hours.value > 0
 }
 
 func (hours Hours) String() string {

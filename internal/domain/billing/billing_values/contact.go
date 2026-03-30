@@ -26,6 +26,10 @@ func (email EmailAddress) String() string {
 	return email.value
 }
 
+func (email EmailAddress) IsZero() bool {
+	return email.value == ""
+}
+
 type PhoneNumber struct {
 	value string
 }
@@ -43,6 +47,10 @@ func (phone PhoneNumber) String() string {
 	return phone.value
 }
 
+func (phone PhoneNumber) IsZero() bool {
+	return phone.value == ""
+}
+
 type TaxIdentifier struct {
 	value string
 }
@@ -58,4 +66,8 @@ func NewTaxIdentifier(value string) (TaxIdentifier, error) {
 
 func (taxID TaxIdentifier) String() string {
 	return taxID.value
+}
+
+func (taxID TaxIdentifier) IsZero() bool {
+	return taxID.value == ""
 }

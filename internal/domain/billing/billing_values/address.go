@@ -68,3 +68,12 @@ func (address Address) PostalCode() string {
 func (address Address) Country() CountryCode {
 	return address.country
 }
+
+func (address Address) IsZero() bool {
+	return address.line1 == "" &&
+		address.line2 == "" &&
+		address.city == "" &&
+		address.state == "" &&
+		address.postalCode == "" &&
+		address.country.IsZero()
+}

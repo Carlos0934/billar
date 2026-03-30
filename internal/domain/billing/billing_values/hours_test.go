@@ -9,13 +9,15 @@ import (
 
 func TestNewHours(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   int64
-		want    string
-		wantErr bool
+		name     string
+		input    int64
+		want     string
+		positive bool
+		wantErr  bool
 	}{
-		{name: "zero", input: 0, want: "0.0000"},
-		{name: "scaled precision", input: 156250, want: "15.6250"},
+		{name: "scaled precision", input: 12500, want: "1.2500", positive: true},
+		{name: "larger scaled precision", input: 156250, want: "15.6250", positive: true},
+		{name: "rejects zero", input: 0, wantErr: true},
 		{name: "rejects negative", input: -1, wantErr: true},
 	}
 
@@ -26,8 +28,8 @@ func TestNewHours(t *testing.T) {
 				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !errors.Is(err, billingvalues.ErrHoursNegative) {
-					t.Fatalf("err = %v, want %v", err, billingvalues.ErrHoursNegative)
+				if !errors.Is(err, billingvalues.ErrHoursMustBePositive) {
+					t.Fatalf("err = %v, want %v", err, billingvalues.ErrHoursMustBePositive)
 				}
 				return
 			}
@@ -38,6 +40,10 @@ func TestNewHours(t *testing.T) {
 
 			if got := hours.String(); got != tt.want {
 				t.Fatalf("string = %q, want %q", got, tt.want)
+			}
+
+			if got := hours.IsPositive(); got != tt.positive {
+				t.Fatalf("IsPositive() = %v, want %v", got, tt.positive)
 			}
 		})
 	}

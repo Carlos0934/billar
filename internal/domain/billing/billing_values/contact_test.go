@@ -38,6 +38,21 @@ func TestNewEmailAddress(t *testing.T) {
 	}
 }
 
+func TestEmailAddressIsZero(t *testing.T) {
+	if !((billingvalues.EmailAddress{}).IsZero()) {
+		t.Fatal("expected zero email address to report IsZero")
+	}
+
+	email, err := billingvalues.NewEmailAddress("billing@example.com")
+	if err != nil {
+		t.Fatalf("NewEmailAddress() error = %v", err)
+	}
+
+	if email.IsZero() {
+		t.Fatal("expected valid email address to be non-zero")
+	}
+}
+
 func TestNewPhoneNumber(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -69,6 +84,21 @@ func TestNewPhoneNumber(t *testing.T) {
 	}
 }
 
+func TestPhoneNumberIsZero(t *testing.T) {
+	if !((billingvalues.PhoneNumber{}).IsZero()) {
+		t.Fatal("expected zero phone number to report IsZero")
+	}
+
+	phone, err := billingvalues.NewPhoneNumber("+1 809 555 1234")
+	if err != nil {
+		t.Fatalf("NewPhoneNumber() error = %v", err)
+	}
+
+	if phone.IsZero() {
+		t.Fatal("expected valid phone number to be non-zero")
+	}
+}
+
 func TestNewTaxIdentifier(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -97,5 +127,20 @@ func TestNewTaxIdentifier(t *testing.T) {
 				t.Fatalf("tax id = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTaxIdentifierIsZero(t *testing.T) {
+	if !((billingvalues.TaxIdentifier{}).IsZero()) {
+		t.Fatal("expected zero tax identifier to report IsZero")
+	}
+
+	taxID, err := billingvalues.NewTaxIdentifier("RNC-123456789")
+	if err != nil {
+		t.Fatalf("NewTaxIdentifier() error = %v", err)
+	}
+
+	if taxID.IsZero() {
+		t.Fatal("expected valid tax identifier to be non-zero")
 	}
 }

@@ -68,3 +68,27 @@ func TestNewAddress(t *testing.T) {
 		})
 	}
 }
+
+func TestAddressIsZero(t *testing.T) {
+	if !((billingvalues.Address{}).IsZero()) {
+		t.Fatal("expected zero address to report IsZero")
+	}
+
+	do, err := billingvalues.NewCountryCode("do")
+	if err != nil {
+		t.Fatalf("NewCountryCode() error = %v", err)
+	}
+
+	address, err := billingvalues.NewAddress(billingvalues.AddressInput{
+		Line1:   "123 Main Street",
+		City:    "Santo Domingo",
+		Country: do,
+	})
+	if err != nil {
+		t.Fatalf("NewAddress() error = %v", err)
+	}
+
+	if address.IsZero() {
+		t.Fatal("expected valid address to be non-zero")
+	}
+}
