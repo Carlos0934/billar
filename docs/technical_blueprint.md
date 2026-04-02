@@ -1,672 +1,602 @@
-# Dev Invoice App — Technical Blueprint (Initial Domain Baseline)
+# Dev Invoice App — Technical Blueprint (Pragmatic Baseline)
 
 ## 1. Scope
 
-This system is a Go modular monolith for managing:
+This system is a Go application for managing:
 
-- customers
-- customer-specific service agreements
-- billable time entries
-- invoice generation
-- invoice PDF rendering
-- CLI execution
-- MCP tool execution
-- local database unlock/session access
+* customers
+* customer-specific service agreements
+* billable time entries
+* invoice generation
+* invoice PDF rendering
+* CLI execution
+* MCP tool execution
+* local session-based access
 
-This baseline intentionally stays simple.
+This baseline stays intentionally pragmatic.
 
 It does **not** include:
 
-- tax engine
-- multi-user auth
-- multi-tenant support
-- CQRS
-- event sourcing
-- message broker
-- workflow engine
-- distributed services
+* tax engine
+* multi-user auth
+* multi-tenant support
+* CQRS
+* event sourcing
+* message broker
+* workflow engine
+* distributed services
 
-The main objective is to support a reliable hourly billing flow with a clean domain and stable boundaries.
+The main objective is to support a reliable hourly billing flow with a clean internal model, simple delivery mechanisms, and direct compatibility with CLI and MCP connectors.
 
 ---
 
-## 2. Frozen Decisions
+## 2. Architecture Direction
 
-### Architecture style
-- Clean DDD + Hexagonal
-- Trimmed for a small, practical Go application
-- Strict inward dependency rule
-- Modular monolith
+### Chosen style
+
+* Pragmatic modular monolith
+* Simple layered architecture
+* Clear internal boundaries
+* Connector-friendly design for CLI and MCP
+
+### What this means
+
+* We keep the billing model explicit.
+* We avoid forcing heavy DDD structure everywhere.
+* We use small business models and services where they help.
+* We expose operations through application commands/services.
+* We keep persistence, PDF rendering, auth, CLI, and MCP outside the core logic.
+
+### What we are explicitly avoiding
+
+* aggregate obsession
+* repository-per-concept dogma
+* complex port taxonomy where it adds no value
+* over-modeled domain language for a small product
+* premature infrastructure complexity
+
+---
+
+## 3. Frozen Decisions
 
 ### Persistence
-- SQLite only
-- Full-file encryption
-- No Turso
-- No cloud sync in the initial version
+
+* SQLite only
+* No encryption in the initial version
+* No Turso
+* No cloud sync in the initial version
 
 ### Access model
-- Single local operator
-- Session/unlock gate required before DB access
-- Session unlock uses a local secret/passphrase
+
+* Single local operator
+* OAuth/OIDC-based authentication
+* Allow access by exact email allowlist and allowed email domains
+* Session gate required before protected operations
+* Session stores authenticated user identity
 
 ### Billing model
-- Hourly billing first
-- Customer can have one or more service agreements
-- One service agreement has one hourly rate at a time
-- Invoice quantity is total billable hours
+
+* Hourly billing first
+* Customer can have one or more service agreements
+* One service agreement has one hourly rate at a time
+* Invoice quantity is total billable hours
 
 ### Currency
-- USD default
-- Base support for future multi-currency
-- No exchange-rate logic yet
-- No FX conversion yet
+
+* USD default
+* Base support for future multi-currency
+* No exchange-rate logic yet
+* No FX conversion yet
 
 ### Precision
-- Money stored as integer
-- Hours stored as integer
-- Money precision: 4 digits
-- Hours precision: 4 digits
-- Invoice display preserves 4-digit precision where required
+
+* Money stored as integer
+* Hours stored as integer
+* Money precision: 4 digits
+* Hours precision: 4 digits
+* Invoice display preserves 4-digit precision where required
 
 ### Tax policy
-- No tax calculation in the initial version
-- Model leaves room for future tax support
+
+* No tax calculation in the initial version
+* Structure should allow future extension
 
 ### PDF rendering
-- Use the library/tooling that gives the easiest path to reproduce the current invoice layout
-- Rendering remains an infrastructure concern behind a port
+
+* Prefer the approach that most easily reproduces the current invoice layout
+* HTML-to-PDF is preferred over low-level drawing unless proven insufficient
+* PDF generation stays behind a rendering service boundary
 
 ---
 
-## 3. Design Principles
+## 4. Design Principles
 
-1. Domain owns business rules.
-2. Application layer orchestrates use cases.
-3. Adapters handle external concerns.
-4. Repositories are per aggregate, not per table.
-5. Entities contain behavior, not just data.
-6. Value objects are immutable and self-validating.
-7. Do not expose persistence directly to CLI or MCP.
-8. MCP and CLI call application use cases only.
-9. Start with the smallest domain that fully supports billing.
-10. Preserve invoice reproducibility: issued invoices must not drift.
-
----
-
-## 4. Bounded Contexts
-
-## 4.1 Billing
-Core domain.
-
-Contains:
-- Customer
-- ServiceAgreement
-- TimeEntry
-- Invoice
-- InvoiceLine
-- IssuerProfile
-- Money
-- Hours
-- CurrencyCode
-
-## 4.2 Access
-Local unlock/session boundary.
-
-Contains:
-- Session
-- Unlock policy
-- Secret verification
-- Lock/unlock lifecycle
-
-## 4.3 Document Rendering
-Support context.
-
-Contains:
-- invoice document projection
-- template selection
-- PDF rendering
-
-This context does not own billing rules.
+1. Keep business rules in plain Go types and services.
+2. Keep the architecture easy to navigate.
+3. CLI and MCP should call the same application services.
+4. Persistence should not leak into billing logic.
+5. Authentication should not leak into billing logic.
+6. PDF rendering should not own invoice calculations.
+7. Issued invoices must remain reproducible.
+8. Prefer boring code over theoretical purity.
+9. Start with the smallest structure that supports the whole billing flow.
 
 ---
 
-## 5. Core Domain Model
+## 5. System Shape
 
-## 5.1 Aggregate: Customer
+Use four practical layers.
+
+## 5.1 Core
+
+Contains the billing model and core rules.
+
+Includes:
+
+* customer
+* service agreement
+* time entry
+* invoice
+* issuer profile
+* money
+* hours
+* currency
+* business validation rules
+
+## 5.2 Application
+
+Contains the operations the app exposes.
+
+Includes:
+
+* create customer
+* create agreement
+* record time entry
+* create invoice draft
+* issue invoice
+* render invoice pdf
+* authenticate/logout session
+* validate authenticated access
+
+## 5.3 Connectors
+
+Contains entrypoints.
+
+Includes:
+
+* CLI commands
+* MCP tools
+* auth callback handlers if needed
+
+These adapters translate input/output and call application services.
+
+## 5.4 Infrastructure
+
+Contains technical implementation details.
+
+Includes:
+
+* SQLite access
+* repositories/store layer
+* OAuth/OIDC integration
+* session persistence
+* PDF renderer
+* config loading
+
+---
+
+## 6. Core Data Model
+
+The app only needs a few stable business objects.
+
+## 6.1 Customer
 
 Represents the billed party.
 
-### Entity: `Customer`
-Fields:
-- `CustomerID`
-- `CustomerType` (`Individual`, `Company`)
-- `LegalName`
-- `TradeName`
-- `TaxID`
-- `Email`
-- `Phone`
-- `Website`
-- `BillingAddress`
-- `Status`
-- `DefaultCurrency`
-- `Notes`
-- `CreatedAt`
-- `UpdatedAt`
+### Fields
 
-### Value objects used
-- `CustomerID`
-- `CustomerType`
-- `TaxIdentifier`
-- `EmailAddress`
-- `PhoneNumber`
-- `Address`
-- `CustomerStatus`
-- `CurrencyCode`
+* `ID`
+* `Type` (`individual`, `company`)
+* `LegalName`
+* `TradeName`
+* `TaxID`
+* `Email`
+* `Phone`
+* `Website`
+* `BillingAddress`
+* `Status`
+* `DefaultCurrency`
+* `Notes`
+* `CreatedAt`
+* `UpdatedAt`
 
-### Behavior
-- create customer
-- update billing identity
-- update contact info
-- activate/deactivate
-- validate invoicing readiness
+### Rules
+
+* a customer must have a billing name
+* inactive customers should not receive new invoices
+* default currency is USD unless explicitly set otherwise
 
 ---
 
-## 5.2 Aggregate: Service Agreement
+## 6.2 ServiceAgreement
 
-Represents the billing agreement between operator and customer.
+Represents a billable agreement for a customer.
 
-### Entity: `ServiceAgreement`
-Fields:
-- `ServiceAgreementID`
-- `CustomerID`
-- `Code`
-- `Name`
-- `Description`
-- `BillingMode`
-- `HourlyRate`
-- `Currency`
-- `Active`
-- `ValidFrom`
-- `ValidUntil`
-- `CreatedAt`
-- `UpdatedAt`
+### Fields
 
-### Value objects used
-- `ServiceAgreementID`
-- `CustomerID`
-- `BillingMode`
-- `Money`
-- `CurrencyCode`
-- `DateRange`
+* `ID`
+* `CustomerID`
+* `Code`
+* `Name`
+* `Description`
+* `BillingMode`
+* `HourlyRate`
+* `Currency`
+* `Active`
+* `ValidFrom`
+* `ValidUntil`
+* `CreatedAt`
+* `UpdatedAt`
 
-### Behavior
-- create service agreement
-- change hourly rate
-- activate/deactivate
-- check if billable on date
-- enforce billing mode constraints
+### Rules
 
-### Notes
-- Initial version supports `hourly` billing mode only.
-- Model should keep `BillingMode` extensible for future fixed-fee or milestone billing.
+* belongs to exactly one customer
+* initial version supports `hourly` only
+* hourly rate must be positive
+* agreement must be active to record billable time
+* rate changes must not mutate issued invoices
 
 ---
 
-## 5.3 Aggregate: Time Entry
+## 6.3 TimeEntry
 
 Represents recorded work.
 
-### Entity: `TimeEntry`
-Fields:
-- `TimeEntryID`
-- `CustomerID`
-- `ServiceAgreementID`
-- `WorkDate`
-- `Hours`
-- `Description`
-- `Billable`
-- `Invoiced`
-- `InvoiceID` (optional)
-- `CreatedAt`
-- `UpdatedAt`
+### Fields
 
-### Value objects used
-- `TimeEntryID`
-- `CustomerID`
-- `ServiceAgreementID`
-- `Hours`
-- `WorkDate`
+* `ID`
+* `CustomerID`
+* `ServiceAgreementID`
+* `WorkDate`
+* `Hours`
+* `Description`
+* `Billable`
+* `InvoiceID` (optional)
+* `CreatedAt`
+* `UpdatedAt`
 
-### Behavior
-- record time entry
-- update description
-- mark non-billable
-- assign to invoice
-- prevent double billing
-- validate agreement/date compatibility
+### Rules
+
+* hours must be greater than zero
+* billable time must reference an active agreement
+* one time entry can belong to one invoice only
+* once invoiced, it becomes financially logouted
+* non-billable entries must not be included in invoice generation
 
 ---
 
-## 5.4 Aggregate: Invoice
+## 6.4 Invoice
 
-Represents a financial document issued to a customer.
+Represents a financial document.
 
-### Aggregate root: `Invoice`
-Fields:
-- `InvoiceID`
-- `InvoiceNumber`
-- `CustomerID`
-- `IssueDate`
-- `DueDate`
-- `Currency`
-- `Status`
-- `Notes`
-- `Subtotal`
-- `GrandTotal`
-- `Lines`
-- `CreatedAt`
-- `UpdatedAt`
+### Fields
 
-### Child entity: `InvoiceLine`
-Fields:
-- `InvoiceLineID`
-- `ServiceAgreementID` (optional)
-- `Description`
-- `Quantity`
-- `UnitPrice`
-- `LineSubtotal`
-- `LineTotal`
-- `SourceType`
-- `SourceRef`
-- `SortOrder`
+* `ID`
+* `InvoiceNumber`
+* `CustomerID`
+* `IssueDate`
+* `DueDate`
+* `Currency`
+* `Status`
+* `Notes`
+* `Subtotal`
+* `GrandTotal`
+* `Lines`
+* `CreatedAt`
+* `UpdatedAt`
 
-### Value objects used
-- `InvoiceID`
-- `InvoiceLineID`
-- `InvoiceNumber`
-- `InvoiceStatus`
-- `CurrencyCode`
-- `Money`
-- `Quantity`
+### InvoiceLine fields
 
-### Behavior
-- create draft invoice
-- add/remove line while draft
-- recalculate totals
-- issue invoice
-- void invoice
-- prevent edits after issue
-- preserve monetary snapshot
+* `ID`
+* `ServiceAgreementID` (optional)
+* `Description`
+* `Quantity`
+* `UnitPrice`
+* `LineSubtotal`
+* `LineTotal`
+* `SourceType`
+* `SourceRef`
+* `SortOrder`
 
-### Notes
-- No tax fields in the first version.
-- Structure should still allow future extension without breaking aggregate semantics.
+### Rules
+
+* an invoice must have at least one line
+* totals are always derived from lines
+* currency must be internally consistent
+* draft invoices are editable
+* issued invoices are immutable
+* grand total equals subtotal in the first version
+* issued invoices preserve rate snapshots
 
 ---
 
-## 5.5 Aggregate: Issuer Profile
+## 6.5 IssuerProfile
 
 Represents the operator/company issuing invoices.
 
-### Entity: `IssuerProfile`
-Fields:
-- `IssuerProfileID`
-- `LegalName`
-- `TaxID`
-- `Email`
-- `Phone`
-- `Website`
-- `Address`
-- `DefaultCurrency`
-- `InvoicePrefix`
-- `PaymentInstructions`
-- `CreatedAt`
-- `UpdatedAt`
+### Fields
 
-### Behavior
-- update issuer identity
-- update invoice defaults
-- validate render readiness
+* `ID`
+* `LegalName`
+* `TaxID`
+* `Email`
+* `Phone`
+* `Website`
+* `Address`
+* `DefaultCurrency`
+* `InvoicePrefix`
+* `PaymentInstructions`
+* `CreatedAt`
+* `UpdatedAt`
 
 ---
 
-## 5.6 Aggregate: Session
+## 6.6 Session
 
-Represents local DB access state.
+Represents current access state.
 
-### Entity: `Session`
-Fields:
-- `SessionID`
-- `Unlocked`
-- `UnlockedAt`
-- `LastActivityAt`
-- `LockedAt`
+### Fields
 
-### Behavior
-- unlock
-- lock
-- validate active access
-- expire/invalidate if policy requires it later
-
-### Notes
-- This is application-facing security state, not enterprise identity.
-- Single local operator means no account model is needed now.
-
----
-
-## 6. Shared Value Objects
-
-## 6.1 `Money`
-Represents monetary value.
+* `ID`
+* `UserEmail`
+* `Unlogouted`
+* `UnlogoutedAt`
+* `LastActivityAt`
+* `LockedAt`
 
 ### Rules
-- stored as integer
-- precision fixed to 4 digits
-- always carries `CurrencyCode`
-- immutable
-- no float usage
 
-### Suggested shape
-- `Amount int64`
-- `Currency CurrencyCode`
-- interpretation: scaled integer with 4 decimal digits
-
-Example:
-- `156250` => `15.6250`
-- `25000000` => `2500.0000`
-
-### Operations
-- add
-- subtract
-- multiply by quantity/hours
-- compare
-- format for invoice display
+* no protected operation before session login
+* login requires valid OAuth/OIDC identity
+* only allowed emails or allowed domains can authenticate session
+* logout invalidates protected access
+* CLI and MCP operations that need storage must fail fast if logouted
 
 ---
 
-## 6.2 `Hours`
-Represents billable time quantity.
+## 7. Shared Types
+
+## 7.1 Money
 
 ### Rules
-- stored as integer
-- precision fixed to 4 digits
-- immutable
-- no float usage
+
+* stored as integer
+* precision fixed to 4 digits
+* always carries currency
+* no float usage
 
 ### Suggested shape
-- `Value int64`
-- interpretation: scaled integer with 4 decimal digits
+
+* `Amount int64`
+* `Currency string`
 
 Example:
-- `1600000` => `160.0000`
-- `12500` => `1.2500`
+
+* `156250` => `15.6250`
+* `25000000` => `2500.0000`
 
 ### Operations
-- add
-- compare
-- validate positive
-- format for invoice display
+
+* add
+* subtract
+* multiply by quantity
+* compare
+* format for invoice display
 
 ---
 
-## 6.3 Other value objects
-- `CurrencyCode`
-- `InvoiceNumber`
-- `Address`
-- `EmailAddress`
-- `PhoneNumber`
-- `TaxIdentifier`
-- `DateRange`
-- `CustomerStatus`
-- `InvoiceStatus`
-- `BillingMode`
+## 7.2 Hours
+
+### Rules
+
+* stored as integer
+* precision fixed to 4 digits
+* no float usage
+
+### Suggested shape
+
+* `Value int64`
+
+Example:
+
+* `1600000` => `160.0000`
+* `12500` => `1.2500`
+
+### Operations
+
+* add
+* compare
+* validate positive
+* format for invoice display
 
 ---
 
-## 7. Business Rules
+## 7.3 Other shared types
 
-## 7.1 Customer rules
-1. A customer must have a billing name.
-2. A customer may exist without any service agreement.
-3. A customer may be deactivated.
-4. Inactive customers should not receive new invoices unless explicitly allowed by future admin policy.
-5. Default currency is USD unless explicitly set otherwise.
-
-## 7.2 Service agreement rules
-1. A service agreement belongs to exactly one customer.
-2. Initial version only supports `hourly` billing mode.
-3. Hourly rate must be positive.
-4. Agreement currency defaults to USD.
-5. Agreement must be active to accept billable time entries.
-6. Rate changes must not mutate already issued invoices.
-7. Agreement may have an optional validity window.
-
-## 7.3 Time entry rules
-1. Hours must be greater than zero.
-2. Billable time must reference an active service agreement.
-3. Time entry date must fit the agreement validity window if one exists.
-4. A time entry may be linked to one invoice only.
-5. Once invoiced, the entry is financially locked.
-6. Non-billable entries must not be included in invoice generation.
-
-## 7.4 Invoice rules
-1. An invoice must have at least one line.
-2. Invoice totals are always derived from lines.
-3. Invoice currency must be internally consistent.
-4. A draft invoice is editable.
-5. An issued invoice is immutable.
-6. A time entry cannot be billed more than once.
-7. Invoice numbering must be unique and sequential.
-8. Line totals are computed from quantity and unit price.
-9. Grand total equals subtotal in the initial version because tax is disabled.
-10. Issued invoices preserve pricing snapshots.
-
-## 7.5 Session/access rules
-1. No repository access before unlock.
-2. Unlock requires the operator secret/passphrase.
-3. Lock invalidates persistence access.
-4. CLI and MCP commands that need data access must fail fast if session is locked.
-5. Encryption details stay outside domain logic.
+* `CurrencyCode`
+* `InvoiceNumber`
+* `Address`
+* `DateRange`
+* `CustomerStatus`
+* `InvoiceStatus`
+* `BillingMode`
 
 ---
 
-## 8. Aggregate Boundaries
+## 8. Application Services
 
-### Customer
-Separate aggregate.
-Referenced by ID.
+Keep the app surface small and explicit.
 
-### ServiceAgreement
-Separate aggregate.
-Referenced by ID.
+## 8.1 Access
 
-### TimeEntry
-Separate aggregate.
-Referenced by ID.
+* `StartLogin`
+* `HandleOAuthCallback`
+* `AuthenticateSession`
+* `Logout`
+* `GetSessionStatus`
+* `ValidateAccess`
 
-### Invoice
-Separate aggregate with `InvoiceLine` inside it.
-Invoice and lines must stay transactionally consistent together.
+## 8.2 Customer
 
-### IssuerProfile
-Separate aggregate.
+* `CreateCustomer`
+* `UpdateCustomer`
+* `GetCustomer`
+* `ListCustomers`
+* `DeactivateCustomer`
 
-### Session
-Separate aggregate/application boundary object.
+## 8.3 Service Agreement
 
-### Rule
-Cross-aggregate references are by ID only.
+* `CreateServiceAgreement`
+* `UpdateServiceAgreementRate`
+* `ActivateServiceAgreement`
+* `DeactivateServiceAgreement`
+* `ListCustomerServiceAgreements`
 
----
+## 8.4 Time Entry
 
-## 9. Domain Services
+* `RecordTimeEntry`
+* `UpdateTimeEntry`
+* `DeleteDraftTimeEntry`
+* `ListCustomerTimeEntries`
+* `ListUnbilledTimeEntries`
 
-Only add domain services where behavior does not fit naturally inside one entity.
+## 8.5 Invoice
 
-## 9.1 `InvoiceFactory`
-Purpose:
-- create draft invoice from unbilled time entries
-- group time entries according to invoice policy
-- produce invoice lines using agreement snapshots
+* `CreateDraftInvoice`
+* `CreateDraftInvoiceFromUnbilledTime`
+* `AddManualInvoiceLine`
+* `RemoveDraftInvoiceLine`
+* `RecalculateInvoiceTotals`
+* `IssueInvoice`
+* `VoidInvoice`
+* `GetInvoice`
+* `ListInvoices`
+* `RenderInvoicePDF`
 
-## 9.2 `InvoiceNumberPolicy`
-Purpose:
-- define invoice numbering format
-- validate generated numbers
+## 8.6 Issuer Profile
 
-## 9.3 `CurrencyPolicy`
-Purpose:
-- enforce current currency constraints
-- keep room for future multi-currency rules
-
-### Current behavior
-- all generated invoices use USD by default
-- agreement currency and invoice currency must match in the initial version
-- no FX conversion supported
-
----
-
-## 10. Application Use Cases
-
-## 10.1 Access
-- `InitializeVault`
-- `UnlockSession`
-- `LockSession`
-- `GetSessionStatus`
-- `RotateUnlockSecret`
-
-## 10.2 Customer
-- `CreateCustomer`
-- `UpdateCustomer`
-- `GetCustomer`
-- `ListCustomers`
-- `DeactivateCustomer`
-
-## 10.3 Service Agreement
-- `CreateServiceAgreement`
-- `UpdateServiceAgreementRate`
-- `ActivateServiceAgreement`
-- `DeactivateServiceAgreement`
-- `ListCustomerServiceAgreements`
-
-## 10.4 Time Entry
-- `RecordTimeEntry`
-- `UpdateTimeEntry`
-- `DeleteDraftTimeEntry`
-- `ListCustomerTimeEntries`
-- `ListUnbilledTimeEntries`
-
-## 10.5 Invoice
-- `CreateDraftInvoice`
-- `CreateDraftInvoiceFromUnbilledTime`
-- `AddManualInvoiceLine`
-- `RemoveDraftInvoiceLine`
-- `RecalculateInvoiceTotals`
-- `IssueInvoice`
-- `VoidInvoice`
-- `GetInvoice`
-- `ListInvoices`
-- `RenderInvoicePDF`
-
-## 10.6 Issuer Profile
-- `SetupIssuerProfile`
-- `UpdateIssuerProfile`
-- `GetIssuerProfile`
+* `SetupIssuerProfile`
+* `UpdateIssuerProfile`
+* `GetIssuerProfile`
 
 ---
 
-## 11. Driver Ports
+## 9. Connector Interfaces
 
-These are the interfaces exposed to CLI and MCP.
+These are enough. No need to overname them as formal ports everywhere.
 
 ```go
-type UnlockSessionUseCase interface {
-    Execute(ctx context.Context, cmd UnlockSessionCommand) (SessionDTO, error)
+type CustomerService interface {
+    Create(ctx context.Context, cmd CreateCustomerCommand) (CustomerDTO, error)
+    Update(ctx context.Context, cmd UpdateCustomerCommand) (CustomerDTO, error)
+    Get(ctx context.Context, id string) (CustomerDTO, error)
+    List(ctx context.Context, filter CustomerFilter) ([]CustomerDTO, error)
 }
 
-type CreateCustomerUseCase interface {
-    Execute(ctx context.Context, cmd CreateCustomerCommand) (CustomerDTO, error)
+type AgreementService interface {
+    Create(ctx context.Context, cmd CreateServiceAgreementCommand) (ServiceAgreementDTO, error)
+    UpdateRate(ctx context.Context, cmd UpdateServiceAgreementRateCommand) (ServiceAgreementDTO, error)
+    ListByCustomer(ctx context.Context, customerID string) ([]ServiceAgreementDTO, error)
 }
 
-type CreateServiceAgreementUseCase interface {
-    Execute(ctx context.Context, cmd CreateServiceAgreementCommand) (ServiceAgreementDTO, error)
+type TimeEntryService interface {
+    Record(ctx context.Context, cmd RecordTimeEntryCommand) (TimeEntryDTO, error)
+    ListUnbilled(ctx context.Context, customerID string, period DateRangeDTO) ([]TimeEntryDTO, error)
 }
 
-type RecordTimeEntryUseCase interface {
-    Execute(ctx context.Context, cmd RecordTimeEntryCommand) (TimeEntryDTO, error)
+type InvoiceService interface {
+    CreateDraftFromUnbilled(ctx context.Context, cmd CreateDraftInvoiceFromUnbilledTimeCommand) (InvoiceDTO, error)
+    Issue(ctx context.Context, invoiceID string) (InvoiceDTO, error)
+    Get(ctx context.Context, invoiceID string) (InvoiceDTO, error)
+    RenderPDF(ctx context.Context, invoiceID string) (RenderedDocumentDTO, error)
 }
 
-type CreateDraftInvoiceFromUnbilledTimeUseCase interface {
-    Execute(ctx context.Context, cmd CreateDraftInvoiceFromUnbilledTimeCommand) (InvoiceDTO, error)
-}
-
-type IssueInvoiceUseCase interface {
-    Execute(ctx context.Context, cmd IssueInvoiceCommand) (InvoiceDTO, error)
-}
-
-type RenderInvoicePDFUseCase interface {
-    Execute(ctx context.Context, query RenderInvoicePDFQuery) (RenderedDocumentDTO, error)
+type SessionService interface {
+    StartLogin(ctx context.Context) (LoginURLDTO, error)
+    HandleOAuthCallback(ctx context.Context, cmd HandleOAuthCallbackCommand) (SessionDTO, error)
+    Unlogout(ctx context.Context, cmd AuthenticateSessionCommand) (SessionDTO, error)
+    Lock(ctx context.Context) error
+    Status(ctx context.Context) (SessionDTO, error)
 }
 ```
 
 ---
 
-## 12. Driven Ports
+## 10. Infrastructure Interfaces
 
-These are the interfaces application/domain depend on.
+These are practical dependencies required by the services.
 
 ```go
-type CustomerRepository interface {
-    Save(ctx context.Context, customer *billing.Customer) error
-    GetByID(ctx context.Context, id billing.CustomerID) (*billing.Customer, error)
-    List(ctx context.Context, filter CustomerFilter) ([]*billing.Customer, error)
+type Store interface {
+    Customers() CustomerStore
+    Agreements() ServiceAgreementStore
+    TimeEntries() TimeEntryStore
+    Invoices() InvoiceStore
+    IssuerProfile() IssuerProfileStore
+    Session() SessionStore
+    InTx(ctx context.Context, fn func(ctx context.Context, store Store) error) error
 }
 
-type ServiceAgreementRepository interface {
-    Save(ctx context.Context, agreement *billing.ServiceAgreement) error
-    GetByID(ctx context.Context, id billing.ServiceAgreementID) (*billing.ServiceAgreement, error)
-    ListByCustomerID(ctx context.Context, customerID billing.CustomerID) ([]*billing.ServiceAgreement, error)
+type CustomerStore interface {
+    Save(ctx context.Context, customer *Customer) error
+    GetByID(ctx context.Context, id string) (*Customer, error)
+    List(ctx context.Context, filter CustomerFilter) ([]*Customer, error)
 }
 
-type TimeEntryRepository interface {
-    Save(ctx context.Context, entry *billing.TimeEntry) error
-    GetByID(ctx context.Context, id billing.TimeEntryID) (*billing.TimeEntry, error)
-    ListUnbilledByCustomer(ctx context.Context, customerID billing.CustomerID, period billing.DateRange) ([]*billing.TimeEntry, error)
+type ServiceAgreementStore interface {
+    Save(ctx context.Context, agreement *ServiceAgreement) error
+    GetByID(ctx context.Context, id string) (*ServiceAgreement, error)
+    ListByCustomerID(ctx context.Context, customerID string) ([]*ServiceAgreement, error)
 }
 
-type InvoiceRepository interface {
-    Save(ctx context.Context, invoice *billing.Invoice) error
-    GetByID(ctx context.Context, id billing.InvoiceID) (*billing.Invoice, error)
-    NextInvoiceNumber(ctx context.Context) (billing.InvoiceNumber, error)
+type TimeEntryStore interface {
+    Save(ctx context.Context, entry *TimeEntry) error
+    GetByID(ctx context.Context, id string) (*TimeEntry, error)
+    ListUnbilledByCustomer(ctx context.Context, customerID string, period DateRange) ([]*TimeEntry, error)
 }
 
-type IssuerProfileRepository interface {
-    Save(ctx context.Context, profile *billing.IssuerProfile) error
-    Get(ctx context.Context) (*billing.IssuerProfile, error)
+type InvoiceStore interface {
+    Save(ctx context.Context, invoice *Invoice) error
+    GetByID(ctx context.Context, id string) (*Invoice, error)
+    NextInvoiceNumber(ctx context.Context) (string, error)
 }
 
-type SessionRepository interface {
-    Save(ctx context.Context, session *access.Session) error
-    GetCurrent(ctx context.Context) (*access.Session, error)
+type IssuerProfileStore interface {
+    Save(ctx context.Context, profile *IssuerProfile) error
+    Get(ctx context.Context) (*IssuerProfile, error)
 }
 
-type UnlockSecretVerifier interface {
-    Verify(ctx context.Context, secret string) error
+type SessionStore interface {
+    Save(ctx context.Context, session *Session) error
+    GetCurrent(ctx context.Context) (*Session, error)
+}
+
+type IdentityVerifier interface {
+    VerifyIDToken(ctx context.Context, rawToken string) (AuthenticatedIdentity, error)
+}
+
+type AccessPolicy interface {
+    IsAllowed(email string) bool
 }
 
 type PDFRenderer interface {
     RenderInvoice(ctx context.Context, doc InvoiceDocument) ([]byte, error)
 }
-
-type UnitOfWork interface {
-    Do(ctx context.Context, fn func(ctx context.Context) error) error
-}
 ```
 
 ---
 
-## 13. Command / Query DTO Sketches
+## 11. Commands / DTOs
 
 ```go
 type CreateCustomerCommand struct {
@@ -718,19 +648,29 @@ type CreateDraftInvoiceFromUnbilledTimeCommand struct {
 ```
 
 ```go
-type IssueInvoiceCommand struct {
-    InvoiceID string
+type HandleOAuthCallbackCommand struct {
+    Code  string
+    State string
+}
+```
+
+```go
+type AuthenticatedIdentity struct {
+    Email          string
+    EmailVerified  bool
+    Subject        string
+    Issuer         string
 }
 ```
 
 ---
 
-## 14. CLI Surface
+## 12. CLI Surface
 
 ```text
-invoice unlock
-invoice lock
-invoice session status
+invoice auth login
+invoice auth logout
+invoice auth status
 
 invoice issuer setup
 invoice issuer show
@@ -755,53 +695,57 @@ invoice invoice pdf --id <id>
 
 ---
 
-## 15. MCP Tool Surface
+## 13. MCP Tool Surface
 
-- `session.unlock`
-- `session.lock`
-- `session.status`
-- `issuer.setup`
-- `issuer.get`
-- `customer.create`
-- `customer.get`
-- `customer.list`
-- `agreement.create`
-- `agreement.list_by_customer`
-- `agreement.update_rate`
-- `time_entry.create`
-- `time_entry.list_by_customer`
-- `time_entry.list_unbilled`
-- `invoice.create_draft_from_unbilled`
-- `invoice.get`
-- `invoice.list`
-- `invoice.issue`
-- `invoice.render_pdf`
+* `session.start_login`
+* `session.handle_callback`
+* `session.logout`
+* `session.status`
+* `issuer.setup`
+* `issuer.get`
+* `customer.create`
+* `customer.get`
+* `customer.list`
+* `agreement.create`
+* `agreement.list_by_customer`
+* `agreement.update_rate`
+* `time_entry.create`
+* `time_entry.list_by_customer`
+* `time_entry.list_unbilled`
+* `invoice.create_draft_from_unbilled`
+* `invoice.get`
+* `invoice.list`
+* `invoice.issue`
+* `invoice.render_pdf`
 
-### Constraint
-MCP never talks to repositories directly.
-MCP calls application use cases only.
+### Rule
 
----
-
-## 16. Storage Notes
-
-### Minimal tables
-- `customers`
-- `service_agreements`
-- `time_entries`
-- `invoices`
-- `invoice_lines`
-- `issuer_profile`
-- `sessions`
-- `invoice_sequences`
-
-### Storage boundary rule
-Encryption, file unlock mechanics, and SQLite specifics stay in adapters/infrastructure.
-The domain does not know encryption exists.
+MCP and CLI both call application services.
+Neither should depend directly on SQLite, OAuth internals, or PDF libraries.
 
 ---
 
-## 17. Suggested Package Structure
+## 14. Minimal Storage Model
+
+Tables:
+
+* `customers`
+* `service_agreements`
+* `time_entries`
+* `invoices`
+* `invoice_lines`
+* `issuer_profile`
+* `sessions`
+* `invoice_sequences`
+
+Rule:
+
+* SQLite details stay inside infrastructure
+* core logic does not know how persistence is implemented
+
+---
+
+## 15. Suggested Package Structure
 
 ```text
 cmd/
@@ -809,148 +753,189 @@ cmd/
   mcp/
 
 internal/
-  domain/
-    customer/
-      entity.go
-      value_objects.go
-      repository.go
-      errors.go
-    serviceagreement/
-      entity.go
-      value_objects.go
-      repository.go
-      errors.go
-    timeentry/
-      entity.go
-      value_objects.go
-      repository.go
-      errors.go
-    invoice/
-      entity.go
-      line.go
-      value_objects.go
-      repository.go
-      services.go
-      errors.go
-    issuer/
-      entity.go
-      repository.go
-    access/
-      session.go
-      repository.go
-      errors.go
-    shared/
-      money.go
-      hours.go
-      address.go
-      currency.go
-      ids.go
-      daterange.go
+  core/
+    customer.go
+    service_agreement.go
+    time_entry.go
+    invoice.go
+    issuer_profile.go
+    session.go
+    money.go
+    hours.go
+    types.go
+    rules.go
 
-  application/
-    access/
-    customer/
-    serviceagreement/
-    timeentry/
-    invoice/
-    issuer/
-    shared/
-      uow.go
-      dto.go
+  app/
+    customer_service.go
+    agreement_service.go
+    time_entry_service.go
+    invoice_service.go
+    issuer_service.go
+    session_service.go
+    dto.go
+    commands.go
 
-  infrastructure/
-    persistence/
-      sqlite/
-    security/
-      vault/
-    rendering/
-      pdf/
+  connectors/
     cli/
     mcp/
+    httpauth/
+
+  infra/
+    sqlite/
+    auth/
+    pdf/
     config/
-    di/
 ```
+
+This structure is flatter, easier to read, and still keeps the right separation.
 
 ---
 
-## 18. Initial Milestone
+## 16. Suggested Libraries
+
+These are candidate libraries, not hard requirements.
+
+### HTTP / routing
+
+* `net/http`
+* `github.com/go-chi/chi/v5`
+
+### OAuth / OIDC
+
+* `github.com/coreos/go-oidc`
+* `golang.org/x/oauth2`
+
+### SQLite
+
+* `modernc.org/sqlite`
+
+### PDF generation
+
+Preferred direction:
+
+* HTML template + browser-based PDF rendering
+
+Candidates:
+
+* `github.com/chromedp/chromedp`
+* `github.com/SebastiaanKlippert/go-wkhtmltopdf`
+
+Fallback if direct drawing is needed:
+
+* `github.com/jung-kurt/gofpdf`
+
+### Configuration
+
+* environment variables first
+* optional config file if needed later
+
+### Notes
+
+* there is no need for a heavy auth framework
+* there is no need for a heavy DDD framework
+* MCP compatibility comes from exposing the right HTTP/tool surface, not from a special billing library
+
+---
+
+## 17. Initial Milestone
 
 Build the first end-to-end billing loop:
 
-1. unlock session
-2. configure issuer profile
-3. create customer
-4. create service agreement
-5. record time entry
-6. create draft invoice from unbilled time
-7. issue invoice
-8. render invoice PDF
+1. authenticate/login
+2. establish session
+3. configure issuer profile
+4. create customer
+5. create service agreement
+6. record time entry
+7. create draft invoice from unbilled time
+8. issue invoice
+9. render invoice PDF
 
 That is the correct first slice.
 
 ---
 
-## 19. Explicit Non-Goals For This Phase
+## 18. Explicit Non-Goals For This Phase
 
 Do not add yet:
-- tax engine
-- payments ledger
-- exchange rates
-- project/task hierarchy
-- user accounts
-- permissions
-- SaaS multi-tenancy
-- messaging/webhooks
-- complex reporting
+
+* tax engine
+* payments ledger
+* exchange rates
+* project/task hierarchy
+* user accounts
+* permissions
+* SaaS multi-tenancy
+* messaging/webhooks
+* complex reporting
+* custom authorization server
 
 ---
 
-## 20. Next Decisions To Freeze
+## 19. Remaining Decisions To Freeze
 
 1. invoice number format
-2. session timeout policy or manual lock-only
-3. PDF rendering library/tool selection
-4. whether invoice lines are grouped by service agreement only or also by date/description
-5. whether time entry editing is allowed after draft invoice creation but before issue
+2. session timeout policy or manual logout-only
+3. final PDF rendering library
+4. invoice grouping policy for time entries
+5. whether time entry editing is allowed after draft creation but before issue
+6. exact OAuth provider choice
 
 ---
 
-## 21. Recommended Default Policies
+## 20. Recommended Defaults
 
-### Currency policy
-- USD by default
-- agreement and invoice must share currency
-- no conversion
+### Currency
 
-### Precision policy
-- internal money precision: 4 digits
-- internal hours precision: 4 digits
-- invoice display: preserve 4-digit formatting for rate and quantity where needed
+* USD by default
+* agreement and invoice must share currency
+* no conversion
 
-### Access policy
-- manual unlock required
-- manual lock available
-- single operator only
+### Precision
 
-### Invoice policy
-- invoices generated from unbilled time entries
-- issued invoices immutable
-- rate snapshot preserved in invoice line
+* internal money precision: 4 digits
+* internal hours precision: 4 digits
+* invoice display preserves 4-digit formatting where needed
+
+### Access
+
+* OAuth/OIDC login required
+* allow exact email matches and allowed domains
+* manual logout available
+* single operator scope for now
+
+### Invoice generation
+
+* invoices generated from unbilled time entries
+* issued invoices immutable
+* rate snapshot preserved in invoice line
+
+### PDF strategy
+
+* prefer HTML-to-PDF
+* preserve the current invoice layout as closely as practical
 
 ---
 
-## 22. Final Domain Cut
+## 21. Final Cut
 
-The minimum stable domain is:
+The minimum stable internal model is:
 
-- `Customer`
-- `ServiceAgreement`
-- `TimeEntry`
-- `Invoice`
-- `InvoiceLine`
-- `IssuerProfile`
-- `Session`
-- shared value objects: `Money`, `Hours`, `CurrencyCode`, `InvoiceNumber`, `Address`
+* `Customer`
+* `ServiceAgreement`
+* `TimeEntry`
+* `Invoice`
+* `InvoiceLine`
+* `IssuerProfile`
+* `Session`
+* shared types: `Money`, `Hours`, `CurrencyCode`, `InvoiceNumber`, `Address`
 
-This is enough to build the first serious version without architecture bloat.
+The minimum viable stack is:
 
+* Go
+* SQLite
+* Chi or net/http
+* go-oidc + oauth2
+* HTML-to-PDF renderer
+
+This is enough to build the first serious version without forcing full DDD ceremony or premature infrastructure complexity.
