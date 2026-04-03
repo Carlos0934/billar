@@ -11,44 +11,29 @@ import (
 )
 
 var (
-	ErrIPNotAllowed       = errors.New("ip not allowed")
-	ErrIdentityNotAllowed = errors.New("identity not allowed")
+	ErrIPNotAllowed = errors.New("ip not allowed")
 )
 
 type IngressGuard struct {
-	allowedIPs     map[string]struct{}
-	allowedEmails  map[string]struct{}
-	allowedDomains map[string]struct{}
+	allowedIPs map[string]struct{}
 }
 
-func DefaultAccessPolicy() config.AccessPolicy {
-	return config.AccessPolicy{}
-}
-
-func NewIngressGuard(policy config.AccessPolicy) IngressGuard {
+func NewIngressGuard(allowedIPs []string) IngressGuard {
 	guard := IngressGuard{
-		allowedIPs:     make(map[string]struct{}, len(policy.AllowedIPs)),
-		allowedEmails:  make(map[string]struct{}, len(policy.AllowedEmails)),
-		allowedDomains: make(map[string]struct{}, len(policy.AllowedDomains)),
+		allowedIPs: make(map[string]struct{}, len(allowedIPs)),
 	}
 
-	for _, value := range policy.AllowedIPs {
+	for _, value := range allowedIPs {
 		if normalized := normalizeIP(value); normalized != "" {
 			guard.allowedIPs[normalized] = struct{}{}
 		}
 	}
-	for _, value := range policy.AllowedEmails {
-		if normalized := normalizeEmail(value); normalized != "" {
-			guard.allowedEmails[normalized] = struct{}{}
-		}
-	}
-	for _, value := range policy.AllowedDomains {
-		if normalized := normalizeDomain(value); normalized != "" {
-			guard.allowedDomains[normalized] = struct{}{}
-		}
-	}
 
 	return guard
+}
+
+func NewIngressGuardFromConfig(policy config.AccessPolicy) IngressGuard {
+	return NewIngressGuard(policy.AllowedIPs)
 }
 
 func (g IngressGuard) CheckIP(ip string) error {
@@ -68,48 +53,6 @@ func (g IngressGuard) CheckIP(ip string) error {
 	return fmt.Errorf("%w: %s", ErrIPNotAllowed, ip)
 }
 
-func (g IngressGuard) CheckIdentity(email string) error {
-	email = strings.TrimSpace(email)
-	if email == "" {
-		return fmt.Errorf("%w: empty email", ErrIdentityNotAllowed)
-	}
-	if len(g.allowedEmails) == 0 && len(g.allowedDomains) == 0 {
-		return fmt.Errorf("%w: no identity allowlist configured", ErrIdentityNotAllowed)
-	}
-
-	if normalized := normalizeEmail(email); normalized != "" {
-		if _, ok := g.allowedEmails[normalized]; ok {
-			return nil
-		}
-	}
-
-	_, domain, found := strings.Cut(strings.ToLower(email), "@")
-	if !found || domain == "" {
-		return fmt.Errorf("%w: invalid email %q", ErrIdentityNotAllowed, email)
-	}
-	if _, ok := g.allowedDomains[domain]; ok {
-		return nil
-	}
-
-	return fmt.Errorf("%w: %s", ErrIdentityNotAllowed, email)
-}
-
-func normalizeEmail(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	return strings.ToLower(value)
-}
-
-func normalizeDomain(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	return strings.ToLower(value)
-}
-
 func normalizeIP(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -123,7 +66,7 @@ func normalizeIP(value string) string {
 }
 
 func (g IngressGuard) hasPolicy() bool {
-	return len(g.allowedIPs) > 0 || len(g.allowedEmails) > 0 || len(g.allowedDomains) > 0
+	return len(g.allowedIPs) > 0
 }
 
 func (g IngressGuard) authorize(headers http.Header) error {
@@ -133,12 +76,6 @@ func (g IngressGuard) authorize(headers http.Header) error {
 
 	if len(g.allowedIPs) > 0 {
 		if err := g.CheckIP(requestIP(headers)); err != nil {
-			return err
-		}
-	}
-
-	if len(g.allowedEmails) > 0 || len(g.allowedDomains) > 0 {
-		if err := g.CheckIdentity(requestEmail(headers)); err != nil {
 			return err
 		}
 	}
@@ -160,20 +97,6 @@ func requestIP(headers http.Header) string {
 
 	if realIP := headers.Get("X-Real-IP"); realIP != "" {
 		return strings.TrimSpace(realIP)
-	}
-
-	return ""
-}
-
-func requestEmail(headers http.Header) string {
-	if headers == nil {
-		return ""
-	}
-
-	for _, key := range []string{"X-Authenticated-Email", "X-User-Email", "X-Forwarded-Email"} {
-		if value := strings.TrimSpace(headers.Get(key)); value != "" {
-			return value
-		}
 	}
 
 	return ""

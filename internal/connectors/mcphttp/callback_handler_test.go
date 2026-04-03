@@ -1,4 +1,4 @@
-package httpauth
+package mcphttp
 
 import (
 	"context"
@@ -127,8 +127,8 @@ func TestCallbackHandler(t *testing.T) {
 				return
 			}
 			if tc.wantStatus == http.StatusFound {
-				if got := rec.Header().Get("Location"); got != "/" {
-					t.Fatalf("Location = %q, want %q", got, "/")
+				if got := rec.Header().Get("Location"); got != "/auth/session" {
+					t.Fatalf("Location = %q, want %q", got, "/auth/session")
 				}
 			}
 			if tc.wantState != "" {

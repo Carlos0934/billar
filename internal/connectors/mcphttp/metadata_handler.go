@@ -1,4 +1,4 @@
-package httpauth
+package mcphttp
 
 import (
 	"encoding/json"

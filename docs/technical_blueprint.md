@@ -182,6 +182,7 @@ Includes:
 * session persistence
 * PDF renderer
 * config loading
+* local HTTP auth server for OAuth/OIDC callback handling during development
 
 ---
 
@@ -723,6 +724,8 @@ invoice invoice pdf --id <id>
 MCP and CLI both call application services.
 Neither should depend directly on SQLite, OAuth internals, or PDF libraries.
 OAuth callback handling is HTTP-only and does not belong in the MCP tool surface.
+The HTTP MCP transport is exposed from the auth HTTP server at `/v1/mcp`.
+Early MCP bootstrap may include deterministic connector-level tools such as `hello_world` while the application surface is still growing.
 `session.start_login` is public; `session.status` and `session.logout` are protected MCP operations.
 For MCP ingress, exact email allowlist or allowed domain remains required, and IP allowlisting is optional by config.
 
@@ -781,7 +784,10 @@ internal/
   connectors/
     cli/
     mcp/
-    httpauth/
+    mcphttp/
+
+cmd/
+  mcp-http/
 
   infra/
     sqlite/
@@ -883,6 +889,8 @@ Do not add yet:
 4. invoice grouping policy for time entries
 5. whether time entry editing is allowed after draft creation but before issue
 6. exact OAuth provider choice
+
+Development default for the first runnable auth surface: Google OIDC with a loopback HTTP callback.
 
 ---
 

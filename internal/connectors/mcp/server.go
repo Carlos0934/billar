@@ -1,6 +1,9 @@
 package mcp
 
 import (
+	"context"
+	"net/http"
+
 	"github.com/Carlos0934/billar/internal/app"
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 )
@@ -11,7 +14,11 @@ type Server struct {
 	toolNames []string
 }
 
-func NewServer(service app.SessionService, guard IngressGuard) *Server {
+type CustomerListProvider interface {
+	List(ctx context.Context, query app.ListQuery) (app.ListResult[app.CustomerDTO], error)
+}
+
+func NewServer(sessionService app.SessionService, customerService CustomerListProvider, guard IngressGuard) *Server {
 	mcpServer := mcpsrv.NewMCPServer(
 		"Billar MCP Session Surface",
 		"1.0.0",
@@ -19,7 +26,7 @@ func NewServer(service app.SessionService, guard IngressGuard) *Server {
 		mcpsrv.WithRecovery(),
 	)
 
-	toolNames := registerSessionTools(mcpServer, service, guard)
+	toolNames := registerTools(mcpServer, sessionService, customerService, guard)
 
 	return &Server{
 		server:    mcpServer,
@@ -38,4 +45,19 @@ func (s *Server) ToolNames() []string {
 
 func (s *Server) ServeStdio() error {
 	return mcpsrv.ServeStdio(s.server)
+}
+
+func (s *Server) HTTPHandler() http.Handler {
+	if s == nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		})
+	}
+
+	return mcpsrv.NewStreamableHTTPServer(
+		s.server,
+		mcpsrv.WithHTTPContextFunc(func(ctx context.Context, r *http.Request) context.Context {
+			return ctx
+		}),
+	)
 }

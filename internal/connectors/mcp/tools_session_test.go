@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/Carlos0934/billar/internal/app"
-	"github.com/Carlos0934/billar/internal/infra/config"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -52,7 +51,7 @@ func TestSessionToolHandlers(t *testing.T) {
 		},
 		logoutDTO: app.LogoutDTO{Message: "Logged out"},
 	}
-	guard := NewIngressGuard(configPolicyForToolTests())
+	guard := NewIngressGuard([]string{"127.0.0.1"})
 
 	tests := []struct {
 		name    string
@@ -127,11 +126,7 @@ func TestSessionToolHandlersRejectIngress(t *testing.T) {
 	t.Parallel()
 
 	service := &sessionServiceStub{}
-	guard := NewIngressGuard(config.AccessPolicy{
-		AllowedIPs:     []string{"127.0.0.1"},
-		AllowedEmails:  []string{"user@example.com"},
-		AllowedDomains: []string{"example.com"},
-	})
+	guard := NewIngressGuard([]string{"127.0.0.1"})
 
 	tests := []struct {
 		name    string
@@ -140,7 +135,7 @@ func TestSessionToolHandlersRejectIngress(t *testing.T) {
 		check   func(*testing.T)
 	}{
 		{
-			name:    "status rejects disallowed ingress",
+			name:    "status rejects disallowed ingress ip",
 			handler: statusTool(service, guard),
 			request: mcp.CallToolRequest{Header: headerWithValues(map[string]string{"X-Forwarded-For": "192.0.2.10", "X-Authenticated-Email": "blocked@other.com"})},
 			check: func(t *testing.T) {
@@ -150,9 +145,9 @@ func TestSessionToolHandlersRejectIngress(t *testing.T) {
 			},
 		},
 		{
-			name:    "logout rejects missing identity",
+			name:    "logout rejects disallowed ingress ip",
 			handler: logoutTool(service, guard),
-			request: mcp.CallToolRequest{Header: headerWithValues(map[string]string{"X-Forwarded-For": "127.0.0.1"})},
+			request: mcp.CallToolRequest{Header: headerWithValues(map[string]string{"X-Forwarded-For": "192.0.2.10"})},
 			check: func(t *testing.T) {
 				if service.logoutCalled {
 					t.Fatal("Logout() was called for a rejected request")
@@ -183,7 +178,7 @@ func TestSessionToolHandlersPermitNoAllowlist(t *testing.T) {
 		statusDTO: app.SessionStatusDTO{Status: "unauthenticated"},
 	}
 
-	result, err := statusTool(service, NewIngressGuard(config.AccessPolicy{}))(context.Background(), mcp.CallToolRequest{})
+	result, err := statusTool(service, NewIngressGuard(nil))(context.Background(), mcp.CallToolRequest{})
 	if err != nil {
 		t.Fatalf("handler error = %v", err)
 	}
@@ -198,15 +193,16 @@ func TestSessionToolHandlersPermitNoAllowlist(t *testing.T) {
 	}
 }
 
-func TestSessionToolHandlersPermitAllowedDomain(t *testing.T) {
+func TestSessionToolHandlersPermitAllowedIngressIP(t *testing.T) {
 	t.Parallel()
 
 	service := &sessionServiceStub{
 		logoutDTO: app.LogoutDTO{Message: "Logged out"},
 	}
-	guard := NewIngressGuard(config.AccessPolicy{AllowedDomains: []string{"example.com"}})
+	guard := NewIngressGuard([]string{"127.0.0.1"})
 
 	result, err := logoutTool(service, guard)(context.Background(), mcp.CallToolRequest{Header: headerWithValues(map[string]string{
+		"X-Forwarded-For":       "127.0.0.1",
 		"X-Authenticated-Email": "person@example.com",
 	})})
 	if err != nil {
@@ -233,14 +229,6 @@ func TestSessionToolHandlersReturnToolErrors(t *testing.T) {
 	}
 	if result == nil || !result.IsError {
 		t.Fatalf("handler result = %+v, want error tool result", result)
-	}
-}
-
-func configPolicyForToolTests() config.AccessPolicy {
-	return config.AccessPolicy{
-		AllowedIPs:     []string{"127.0.0.1"},
-		AllowedEmails:  []string{"user@example.com"},
-		AllowedDomains: []string{"example.com"},
 	}
 }
 

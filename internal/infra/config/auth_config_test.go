@@ -18,17 +18,21 @@ func TestLoadAuthConfig(t *testing.T) {
 		{
 			name: "parses values and trims whitespace",
 			env: map[string]string{
-				"BILLAR_OAUTH_CLIENT_ID":          " client-id ",
-				"BILLAR_OAUTH_CLIENT_SECRET":      " secret-value ",
-				"BILLAR_OAUTH_ISSUER_URL":         " https://issuer.example ",
-				"BILLAR_AUTH_ALLOWED_EMAILS":      " admin@example.com , user@example.com ",
-				"BILLAR_AUTH_ALLOWED_DOMAINS":     " allowed.com , company.com ",
-				"BILLAR_AUTH_RESOURCE_SERVER_URI": " https://resource.example ",
+				"OAUTH_CLIENT_ID":          " client-id ",
+				"OAUTH_CLIENT_SECRET":      " secret-value ",
+				"OAUTH_ISSUER_URL":         " https://issuer.example ",
+				"OAUTH_REDIRECT_URL":       " http://127.0.0.1:8080/auth/callback ",
+				"MCP_HTTP_LISTEN_ADDR":     " 127.0.0.1:8080 ",
+				"AUTH_ALLOWED_EMAILS":      " admin@example.com , user@example.com ",
+				"AUTH_ALLOWED_DOMAINS":     " allowed.com , company.com ",
+				"AUTH_RESOURCE_SERVER_URI": " https://resource.example ",
 			},
 			want: AuthConfig{
 				ClientID:          "client-id",
 				ClientSecret:      "secret-value",
 				IssuerURL:         "https://issuer.example",
+				RedirectURL:       "http://127.0.0.1:8080/auth/callback",
+				ListenAddr:        "127.0.0.1:8080",
 				AllowedEmails:     []string{"admin@example.com", "user@example.com"},
 				AllowedDomains:    []string{"allowed.com", "company.com"},
 				ResourceServerURI: "https://resource.example",
@@ -37,14 +41,19 @@ func TestLoadAuthConfig(t *testing.T) {
 		{
 			name: "defaults missing oauth strings to empty values",
 			env: map[string]string{
-				"BILLAR_OAUTH_CLIENT_ID":          "",
-				"BILLAR_OAUTH_CLIENT_SECRET":      "",
-				"BILLAR_OAUTH_ISSUER_URL":         "",
-				"BILLAR_AUTH_ALLOWED_EMAILS":      "admin@example.com",
-				"BILLAR_AUTH_ALLOWED_DOMAINS":     "",
-				"BILLAR_AUTH_RESOURCE_SERVER_URI": "https://resource.example",
+				"OAUTH_CLIENT_ID":          "",
+				"OAUTH_CLIENT_SECRET":      "",
+				"OAUTH_ISSUER_URL":         "",
+				"OAUTH_REDIRECT_URL":       "",
+				"MCP_HTTP_LISTEN_ADDR":     "",
+				"AUTH_ALLOWED_EMAILS":      "admin@example.com",
+				"AUTH_ALLOWED_DOMAINS":     "",
+				"AUTH_RESOURCE_SERVER_URI": "https://resource.example",
 			},
 			want: AuthConfig{
+				IssuerURL:         "https://accounts.google.com",
+				RedirectURL:       "https://resource.example/auth/callback",
+				ListenAddr:        "127.0.0.1:8080",
 				AllowedEmails:     []string{"admin@example.com"},
 				AllowedDomains:    []string{},
 				ResourceServerURI: "https://resource.example",
@@ -53,12 +62,14 @@ func TestLoadAuthConfig(t *testing.T) {
 		{
 			name: "rejects empty policy after trimming",
 			env: map[string]string{
-				"BILLAR_OAUTH_CLIENT_ID":          "client-id",
-				"BILLAR_OAUTH_CLIENT_SECRET":      "secret-value",
-				"BILLAR_OAUTH_ISSUER_URL":         "https://issuer.example",
-				"BILLAR_AUTH_ALLOWED_EMAILS":      "   ",
-				"BILLAR_AUTH_ALLOWED_DOMAINS":     "",
-				"BILLAR_AUTH_RESOURCE_SERVER_URI": "https://resource.example",
+				"OAUTH_CLIENT_ID":          "client-id",
+				"OAUTH_CLIENT_SECRET":      "secret-value",
+				"OAUTH_ISSUER_URL":         "https://issuer.example",
+				"OAUTH_REDIRECT_URL":       "http://127.0.0.1:8080/auth/callback",
+				"MCP_HTTP_LISTEN_ADDR":     "127.0.0.1:8080",
+				"AUTH_ALLOWED_EMAILS":      "   ",
+				"AUTH_ALLOWED_DOMAINS":     "",
+				"AUTH_RESOURCE_SERVER_URI": "https://resource.example",
 			},
 			wantErr: "access policy",
 		},
@@ -69,12 +80,14 @@ func TestLoadAuthConfig(t *testing.T) {
 
 		t.Run(tc.name, func(t *testing.T) {
 			for _, key := range []string{
-				"BILLAR_OAUTH_CLIENT_ID",
-				"BILLAR_OAUTH_CLIENT_SECRET",
-				"BILLAR_OAUTH_ISSUER_URL",
-				"BILLAR_AUTH_ALLOWED_EMAILS",
-				"BILLAR_AUTH_ALLOWED_DOMAINS",
-				"BILLAR_AUTH_RESOURCE_SERVER_URI",
+				"OAUTH_CLIENT_ID",
+				"OAUTH_CLIENT_SECRET",
+				"OAUTH_ISSUER_URL",
+				"OAUTH_REDIRECT_URL",
+				"MCP_HTTP_LISTEN_ADDR",
+				"AUTH_ALLOWED_EMAILS",
+				"AUTH_ALLOWED_DOMAINS",
+				"AUTH_RESOURCE_SERVER_URI",
 			} {
 				t.Setenv(key, tc.env[key])
 			}
@@ -108,18 +121,20 @@ func TestLoadAuthConfigLoadsDotEnv(t *testing.T) {
 	}
 
 	workdir := t.TempDir()
-	content := []byte("BILLAR_OAUTH_CLIENT_ID=from-file\nBILLAR_OAUTH_CLIENT_SECRET=from-file-secret\nBILLAR_OAUTH_ISSUER_URL=https://issuer.from.file\nBILLAR_AUTH_ALLOWED_EMAILS= file-user@example.com \nBILLAR_AUTH_ALLOWED_DOMAINS=file.example.com\nBILLAR_AUTH_RESOURCE_SERVER_URI=https://resource.from.file\n")
+	content := []byte("OAUTH_CLIENT_ID=from-file\nOAUTH_CLIENT_SECRET=from-file-secret\nOAUTH_ISSUER_URL=https://issuer.from.file\nOAUTH_REDIRECT_URL=http://127.0.0.1:8080/auth/callback\nMCP_HTTP_LISTEN_ADDR=127.0.0.1:8080\nAUTH_ALLOWED_EMAILS= file-user@example.com \nAUTH_ALLOWED_DOMAINS=file.example.com\nAUTH_RESOURCE_SERVER_URI=https://resource.from.file\n")
 	if err := os.WriteFile(filepath.Join(workdir, ".env"), content, 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
 	for _, key := range []string{
-		"BILLAR_OAUTH_CLIENT_ID",
-		"BILLAR_OAUTH_CLIENT_SECRET",
-		"BILLAR_OAUTH_ISSUER_URL",
-		"BILLAR_AUTH_ALLOWED_EMAILS",
-		"BILLAR_AUTH_ALLOWED_DOMAINS",
-		"BILLAR_AUTH_RESOURCE_SERVER_URI",
+		"OAUTH_CLIENT_ID",
+		"OAUTH_CLIENT_SECRET",
+		"OAUTH_ISSUER_URL",
+		"OAUTH_REDIRECT_URL",
+		"MCP_HTTP_LISTEN_ADDR",
+		"AUTH_ALLOWED_EMAILS",
+		"AUTH_ALLOWED_DOMAINS",
+		"AUTH_RESOURCE_SERVER_URI",
 	} {
 		t.Setenv(key, "")
 	}
@@ -140,6 +155,8 @@ func TestLoadAuthConfigLoadsDotEnv(t *testing.T) {
 		ClientID:          "from-file",
 		ClientSecret:      "from-file-secret",
 		IssuerURL:         "https://issuer.from.file",
+		RedirectURL:       "http://127.0.0.1:8080/auth/callback",
+		ListenAddr:        "127.0.0.1:8080",
 		AllowedEmails:     []string{"file-user@example.com"},
 		AllowedDomains:    []string{"file.example.com"},
 		ResourceServerURI: "https://resource.from.file",
@@ -157,17 +174,19 @@ func TestLoadAuthConfigPreservesExplicitEnvAndTrimsQuotedDotEnvValues(t *testing
 	}
 
 	workdir := t.TempDir()
-	content := []byte("BILLAR_OAUTH_CLIENT_ID='from-file'\nBILLAR_OAUTH_CLIENT_SECRET=\"from-file-secret\"\nBILLAR_OAUTH_ISSUER_URL='https://issuer.from.file'\nBILLAR_AUTH_ALLOWED_EMAILS=' file-user@example.com '\nBILLAR_AUTH_ALLOWED_DOMAINS=\"file.example.com\"\nBILLAR_AUTH_RESOURCE_SERVER_URI='https://resource.from.file'\n")
+	content := []byte("OAUTH_CLIENT_ID='from-file'\nOAUTH_CLIENT_SECRET=\"from-file-secret\"\nOAUTH_ISSUER_URL='https://issuer.from.file'\nOAUTH_REDIRECT_URL='http://127.0.0.1:8080/auth/callback'\nMCP_HTTP_LISTEN_ADDR='127.0.0.1:8080'\nAUTH_ALLOWED_EMAILS=' file-user@example.com '\nAUTH_ALLOWED_DOMAINS=\"file.example.com\"\nAUTH_RESOURCE_SERVER_URI='https://resource.from.file'\n")
 	if err := os.WriteFile(filepath.Join(workdir, ".env"), content, 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	t.Setenv("BILLAR_OAUTH_CLIENT_ID", "preset-client-id")
-	t.Setenv("BILLAR_OAUTH_CLIENT_SECRET", "")
-	t.Setenv("BILLAR_OAUTH_ISSUER_URL", "")
-	t.Setenv("BILLAR_AUTH_ALLOWED_EMAILS", "")
-	t.Setenv("BILLAR_AUTH_ALLOWED_DOMAINS", "")
-	t.Setenv("BILLAR_AUTH_RESOURCE_SERVER_URI", "")
+	t.Setenv("OAUTH_CLIENT_ID", "preset-client-id")
+	t.Setenv("OAUTH_CLIENT_SECRET", "")
+	t.Setenv("OAUTH_ISSUER_URL", "")
+	t.Setenv("OAUTH_REDIRECT_URL", "")
+	t.Setenv("MCP_HTTP_LISTEN_ADDR", "")
+	t.Setenv("AUTH_ALLOWED_EMAILS", "")
+	t.Setenv("AUTH_ALLOWED_DOMAINS", "")
+	t.Setenv("AUTH_RESOURCE_SERVER_URI", "")
 
 	if err := os.Chdir(workdir); err != nil {
 		t.Fatalf("Chdir() error = %v", err)
@@ -185,6 +204,8 @@ func TestLoadAuthConfigPreservesExplicitEnvAndTrimsQuotedDotEnvValues(t *testing
 		ClientID:          "preset-client-id",
 		ClientSecret:      "from-file-secret",
 		IssuerURL:         "https://issuer.from.file",
+		RedirectURL:       "http://127.0.0.1:8080/auth/callback",
+		ListenAddr:        "127.0.0.1:8080",
 		AllowedEmails:     []string{"file-user@example.com"},
 		AllowedDomains:    []string{"file.example.com"},
 		ResourceServerURI: "https://resource.from.file",
@@ -204,12 +225,14 @@ func TestEnvExampleDocumentsAuthSetup(t *testing.T) {
 
 	text := string(content)
 	for _, want := range []string{
-		"BILLAR_OAUTH_CLIENT_ID=",
-		"BILLAR_OAUTH_CLIENT_SECRET=",
-		"BILLAR_OAUTH_ISSUER_URL=",
-		"BILLAR_AUTH_RESOURCE_SERVER_URI=",
-		"BILLAR_AUTH_ALLOWED_EMAILS=",
-		"BILLAR_AUTH_ALLOWED_DOMAINS=",
+		"OAUTH_CLIENT_ID=",
+		"OAUTH_CLIENT_SECRET=",
+		"OAUTH_ISSUER_URL=",
+		"OAUTH_REDIRECT_URL=",
+		"MCP_HTTP_LISTEN_ADDR=",
+		"AUTH_RESOURCE_SERVER_URI=",
+		"AUTH_ALLOWED_EMAILS=",
+		"AUTH_ALLOWED_DOMAINS=",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf(".env.example missing %q", want)

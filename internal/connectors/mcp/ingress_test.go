@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/Carlos0934/billar/internal/infra/config"
@@ -10,7 +11,7 @@ import (
 func TestIngressGuardCheckIP(t *testing.T) {
 	t.Parallel()
 
-	guard := NewIngressGuard(config.AccessPolicy{AllowedIPs: []string{"127.0.0.1", "10.0.0.1"}})
+	guard := NewIngressGuard([]string{"127.0.0.1", "10.0.0.1"})
 
 	tests := []struct {
 		name    string
@@ -48,51 +49,43 @@ func TestIngressGuardCheckIP(t *testing.T) {
 	t.Run("no allowlist permits all ips", func(t *testing.T) {
 		t.Parallel()
 
-		if err := NewIngressGuard(config.AccessPolicy{}).CheckIP("203.0.113.9"); err != nil {
+		if err := NewIngressGuard(nil).CheckIP("203.0.113.9"); err != nil {
 			t.Fatalf("CheckIP() error = %v, want nil", err)
 		}
 	})
 }
 
-func TestIngressGuardCheckIdentity(t *testing.T) {
+func TestIngressGuardAuthorizeUsesOnlyIPAllowlist(t *testing.T) {
 	t.Parallel()
 
-	guard := NewIngressGuard(config.AccessPolicy{
-		AllowedEmails:  []string{"admin@example.com"},
-		AllowedDomains: []string{"company.com"},
-	})
+	guard := NewIngressGuard([]string{"127.0.0.1"})
 
-	tests := []struct {
-		name    string
-		email   string
-		wantErr bool
-	}{
-		{name: "exact email match", email: "ADMIN@example.com"},
-		{name: "domain match", email: "employee@Company.Com"},
-		{name: "denied identity", email: "hacker@other.com", wantErr: true},
-		{name: "invalid email", email: "not-an-email", wantErr: true},
-		{name: "subdomain does not match", email: "employee@sub.company.com", wantErr: true},
+	if err := guard.authorize(http.Header{
+		"X-Forwarded-For":       []string{"127.0.0.1"},
+		"X-Authenticated-Email": []string{"blocked@example.com"},
+	}); err != nil {
+		t.Fatalf("authorize() error = %v", err)
 	}
 
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+	if err := guard.authorize(http.Header{
+		"X-Forwarded-For": []string{"192.0.2.10"},
+	}); err == nil || !errors.Is(err, ErrIPNotAllowed) {
+		t.Fatalf("authorize() error = %v, want ErrIPNotAllowed", err)
+	}
+}
 
-			err := guard.CheckIdentity(tc.email)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("CheckIdentity() error = nil, want non-nil")
-				}
-				if !errors.Is(err, ErrIdentityNotAllowed) {
-					t.Fatalf("CheckIdentity() error = %v, want ErrIdentityNotAllowed", err)
-				}
-				return
-			}
+func TestNewIngressGuardFromConfigBuildsIPOnlyPolicy(t *testing.T) {
+	t.Parallel()
 
-			if err != nil {
-				t.Fatalf("CheckIdentity() error = %v", err)
-			}
-		})
+	guard := NewIngressGuardFromConfig(config.AccessPolicy{
+		AllowedIPs:     []string{"127.0.0.1"},
+		AllowedDomains: []string{"example.com"},
+	})
+
+	if err := guard.CheckIP("127.0.0.1"); err != nil {
+		t.Fatalf("CheckIP() error = %v", err)
+	}
+	if err := guard.authorize(http.Header{"X-Forwarded-For": []string{"127.0.0.1"}, "X-Authenticated-Email": []string{"person@example.com"}}); err != nil {
+		t.Fatalf("authorize() error = %v", err)
 	}
 }

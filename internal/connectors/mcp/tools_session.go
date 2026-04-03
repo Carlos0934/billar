@@ -9,8 +9,8 @@ import (
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 )
 
-func registerSessionTools(server *mcpsrv.MCPServer, service app.SessionService, guard IngressGuard) []string {
-	registered := make([]string, 0, 3)
+func registerTools(server *mcpsrv.MCPServer, service app.SessionService, customer CustomerListProvider, guard IngressGuard) []string {
+	registered := make([]string, 0, 4)
 
 	loginTool, loginHandler := sessionStartLoginTool(service)
 	server.AddTool(loginTool, loginHandler)
@@ -23,6 +23,8 @@ func registerSessionTools(server *mcpsrv.MCPServer, service app.SessionService, 
 	logoutTool, logoutHandler := sessionLogoutTool(service, guard)
 	server.AddTool(logoutTool, logoutHandler)
 	registered = append(registered, logoutTool.Name)
+
+	registered = append(registered, registerCustomerTools(server, customer, guard)...)
 
 	return registered
 }

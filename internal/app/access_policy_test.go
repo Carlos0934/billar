@@ -5,37 +5,37 @@ import "testing"
 func TestEnvAccessPolicyIsAllowed(t *testing.T) {
 	tests := []struct {
 		name   string
-		policy EnvAccessPolicy
+		policy IdentityPolicy
 		email  string
 		want   bool
 	}{
 		{
 			name:   "exact email match is case-insensitive",
-			policy: EnvAccessPolicy{AllowedEmails: []string{"admin@example.com"}},
+			policy: IdentityPolicy{AllowedEmails: []string{"admin@example.com"}},
 			email:  "ADMIN@example.com",
 			want:   true,
 		},
 		{
 			name:   "domain match is case-insensitive",
-			policy: EnvAccessPolicy{AllowedDomains: []string{"company.com"}},
+			policy: IdentityPolicy{AllowedDomains: []string{"company.com"}},
 			email:  "employee@Company.Com",
 			want:   true,
 		},
 		{
 			name:   "subdomain rejection requires exact domain match",
-			policy: EnvAccessPolicy{AllowedDomains: []string{"company.com"}},
+			policy: IdentityPolicy{AllowedDomains: []string{"company.com"}},
 			email:  "employee@sub.company.com",
 			want:   false,
 		},
 		{
 			name:   "empty policy denies all identities",
-			policy: EnvAccessPolicy{},
+			policy: IdentityPolicy{},
 			email:  "user@example.com",
 			want:   false,
 		},
 		{
 			name:   "configured allowlists deny identities that do not match",
-			policy: EnvAccessPolicy{AllowedEmails: []string{"admin@example.com"}, AllowedDomains: []string{"company.com"}},
+			policy: IdentityPolicy{AllowedEmails: []string{"admin@example.com"}, AllowedDomains: []string{"company.com"}},
 			email:  "unknown@other.com",
 			want:   false,
 		},

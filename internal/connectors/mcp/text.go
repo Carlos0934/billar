@@ -41,3 +41,44 @@ func logoutText(dto app.LogoutDTO) string {
 	}
 	return message + "\n"
 }
+
+func customerListText(result app.ListResult[app.CustomerDTO]) string {
+	var builder strings.Builder
+	builder.WriteString("Billar Customers\n")
+	builder.WriteString("───────────────\n")
+	builder.WriteString(fmt.Sprintf("Page: %d\n", result.Page))
+	builder.WriteString(fmt.Sprintf("Page size: %d\n", result.PageSize))
+	builder.WriteString(fmt.Sprintf("Total: %d\n", result.Total))
+
+	if len(result.Items) == 0 {
+		builder.WriteString("No customers found\n")
+		return builder.String()
+	}
+
+	builder.WriteString("\n")
+	for i, customer := range result.Items {
+		if i > 0 {
+			builder.WriteString("\n")
+		}
+		builder.WriteString(fmt.Sprintf("%d. %s\n", i+1, customer.LegalName))
+		if customer.TradeName != "" && customer.TradeName != customer.LegalName {
+			builder.WriteString(fmt.Sprintf("   Trade name: %s\n", customer.TradeName))
+		}
+		builder.WriteString(fmt.Sprintf("   Type: %s\n", customer.Type))
+		builder.WriteString(fmt.Sprintf("   Status: %s\n", customer.Status))
+		if customer.Email != "" {
+			builder.WriteString(fmt.Sprintf("   Email: %s\n", customer.Email))
+		}
+		if customer.DefaultCurrency != "" {
+			builder.WriteString(fmt.Sprintf("   Default currency: %s\n", customer.DefaultCurrency))
+		}
+		if customer.CreatedAt != "" {
+			builder.WriteString(fmt.Sprintf("   Created at: %s\n", customer.CreatedAt))
+		}
+		if customer.UpdatedAt != "" {
+			builder.WriteString(fmt.Sprintf("   Updated at: %s\n", customer.UpdatedAt))
+		}
+	}
+
+	return builder.String()
+}

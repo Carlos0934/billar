@@ -16,8 +16,8 @@ func TestNewServerRegistersSessionTools(t *testing.T) {
 		logoutDTO:     app.LogoutDTO{Message: "Logged out"},
 	}
 
-	server := NewServer(service, NewIngressGuard(DefaultAccessPolicy()))
-	want := []string{"session.start_login", "session.status", "session.logout"}
+	server := NewServer(service, &customerListServiceStub{}, NewIngressGuard(nil))
+	want := []string{"session.start_login", "session.status", "session.logout", "customer.list"}
 	if got := server.ToolNames(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("ToolNames() = %v, want %v", got, want)
 	}

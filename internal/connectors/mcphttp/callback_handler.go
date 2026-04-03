@@ -1,4 +1,4 @@
-package httpauth
+package mcphttp
 
 import (
 	"context"
@@ -35,7 +35,7 @@ func CallbackHandler(useCase CallbackUseCase, stateStore app.StateStore) http.Ha
 
 		_, err := useCase.HandleOAuthCallback(r.Context(), app.HandleOAuthCallbackCommand{Code: code, State: state})
 		if err != nil {
-			if errors.Is(err, app.ErrUnauthorizedIdentity) {
+			if errors.Is(err, app.ErrUnauthorizedIdentity) || errors.Is(err, app.ErrEmailNotVerified) {
 				http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 				return
 			}
@@ -43,6 +43,6 @@ func CallbackHandler(useCase CallbackUseCase, stateStore app.StateStore) http.Ha
 			return
 		}
 
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, "/auth/session", http.StatusFound)
 	}
 }
