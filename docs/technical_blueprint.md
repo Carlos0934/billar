@@ -524,9 +524,10 @@ type InvoiceService interface {
 type SessionService interface {
     StartLogin(ctx context.Context) (LoginURLDTO, error)
     HandleOAuthCallback(ctx context.Context, cmd HandleOAuthCallbackCommand) (SessionDTO, error)
-    Unlogout(ctx context.Context, cmd AuthenticateSessionCommand) (SessionDTO, error)
-    Lock(ctx context.Context) error
+    AuthenticateSession(ctx context.Context, rawToken string) (SessionDTO, error)
+    Logout(ctx context.Context) error
     Status(ctx context.Context) (SessionDTO, error)
+    ValidateAccess(ctx context.Context) (bool, error)
 }
 ```
 
@@ -698,7 +699,6 @@ invoice invoice pdf --id <id>
 ## 13. MCP Tool Surface
 
 * `session.start_login`
-* `session.handle_callback`
 * `session.logout`
 * `session.status`
 * `issuer.setup`
@@ -722,6 +722,9 @@ invoice invoice pdf --id <id>
 
 MCP and CLI both call application services.
 Neither should depend directly on SQLite, OAuth internals, or PDF libraries.
+OAuth callback handling is HTTP-only and does not belong in the MCP tool surface.
+`session.start_login` is public; `session.status` and `session.logout` are protected MCP operations.
+For MCP ingress, exact email allowlist or allowed domain remains required, and IP allowlisting is optional by config.
 
 ---
 
@@ -901,6 +904,7 @@ Do not add yet:
 
 * OAuth/OIDC login required
 * allow exact email matches and allowed domains
+* MCP may additionally enforce optional ingress IP allowlists by config
 * manual logout available
 * single operator scope for now
 
