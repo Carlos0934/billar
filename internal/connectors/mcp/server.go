@@ -58,7 +58,11 @@ func (s *Server) HTTPHandler() http.Handler {
 	return mcpsrv.NewStreamableHTTPServer(
 		s.server,
 		mcpsrv.WithHTTPContextFunc(func(ctx context.Context, r *http.Request) context.Context {
-			return ctx
+			identity, ok, err := (app.ContextIdentitySource{}).CurrentIdentity(r.Context())
+			if err != nil || !ok {
+				return ctx
+			}
+			return app.WithAuthenticatedIdentity(ctx, identity)
 		}),
 	)
 }

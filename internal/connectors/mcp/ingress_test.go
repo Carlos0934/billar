@@ -61,8 +61,7 @@ func TestIngressGuardAuthorizeUsesOnlyIPAllowlist(t *testing.T) {
 	guard := NewIngressGuard([]string{"127.0.0.1"})
 
 	if err := guard.authorize(http.Header{
-		"X-Forwarded-For":       []string{"127.0.0.1"},
-		"X-Authenticated-Email": []string{"blocked@example.com"},
+		"X-Forwarded-For": []string{"127.0.0.1"},
 	}); err != nil {
 		t.Fatalf("authorize() error = %v", err)
 	}
@@ -85,7 +84,7 @@ func TestNewIngressGuardFromConfigBuildsIPOnlyPolicy(t *testing.T) {
 	if err := guard.CheckIP("127.0.0.1"); err != nil {
 		t.Fatalf("CheckIP() error = %v", err)
 	}
-	if err := guard.authorize(http.Header{"X-Forwarded-For": []string{"127.0.0.1"}, "X-Authenticated-Email": []string{"person@example.com"}}); err != nil {
+	if err := guard.authorize(http.Header{"X-Forwarded-For": []string{"127.0.0.1"}}); err != nil {
 		t.Fatalf("authorize() error = %v", err)
 	}
 }

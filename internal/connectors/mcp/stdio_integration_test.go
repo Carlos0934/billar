@@ -20,7 +20,7 @@ func TestMCPServerOverStdio(t *testing.T) {
 
 	stdio := transport.NewStdioWithOptions(
 		"go",
-		[]string{"OAUTH_PROVIDER=test-provider", "BILLAR_SESSION_EMAIL=integration@example.com"},
+		[]string{"OAUTH_PROVIDER=test-provider", "BILLAR_LOCAL_AUTH_EMAIL=integration@example.com"},
 		[]string{"run", "./cmd/mcp"},
 		transport.WithCommandFunc(func(ctx context.Context, command string, env []string, args []string) (*exec.Cmd, error) {
 			cmd := exec.CommandContext(ctx, command, args...)
@@ -100,8 +100,8 @@ func TestMCPServerOverStdio(t *testing.T) {
 	if len(statusResult.Content) != 1 {
 		t.Fatalf("CallTool(session.status) content = %d items, want 1", len(statusResult.Content))
 	}
-	if got := mcp.GetTextFromContent(statusResult.Content[0]); got != "Status: active\nEmail: integration@example.com\nEmail verified: true\n" {
-		t.Fatalf("CallTool(session.status) text = %q, want %q", got, "Status: active\nEmail: integration@example.com\nEmail verified: true\n")
+	if got := mcp.GetTextFromContent(statusResult.Content[0]); got != "Status: active\nEmail: integration@example.com\nEmail verified: true\nSubject: local-bypass\nIssuer: billar://local\n" {
+		t.Fatalf("CallTool(session.status) text = %q, want %q", got, "Status: active\nEmail: integration@example.com\nEmail verified: true\nSubject: local-bypass\nIssuer: billar://local\n")
 	}
 }
 

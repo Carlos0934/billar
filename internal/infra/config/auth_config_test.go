@@ -19,9 +19,7 @@ func TestLoadAuthConfig(t *testing.T) {
 			name: "parses values and trims whitespace",
 			env: map[string]string{
 				"OAUTH_CLIENT_ID":          " client-id ",
-				"OAUTH_CLIENT_SECRET":      " secret-value ",
 				"OAUTH_ISSUER_URL":         " https://issuer.example ",
-				"OAUTH_REDIRECT_URL":       " http://127.0.0.1:8080/auth/callback ",
 				"MCP_HTTP_LISTEN_ADDR":     " 127.0.0.1:8080 ",
 				"AUTH_ALLOWED_EMAILS":      " admin@example.com , user@example.com ",
 				"AUTH_ALLOWED_DOMAINS":     " allowed.com , company.com ",
@@ -29,9 +27,7 @@ func TestLoadAuthConfig(t *testing.T) {
 			},
 			want: AuthConfig{
 				ClientID:          "client-id",
-				ClientSecret:      "secret-value",
 				IssuerURL:         "https://issuer.example",
-				RedirectURL:       "http://127.0.0.1:8080/auth/callback",
 				ListenAddr:        "127.0.0.1:8080",
 				AllowedEmails:     []string{"admin@example.com", "user@example.com"},
 				AllowedDomains:    []string{"allowed.com", "company.com"},
@@ -39,20 +35,18 @@ func TestLoadAuthConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "defaults missing oauth strings to empty values",
+			name: "defaults missing issuer and listen values",
 			env: map[string]string{
-				"OAUTH_CLIENT_ID":          "",
-				"OAUTH_CLIENT_SECRET":      "",
+				"OAUTH_CLIENT_ID":          "client-id",
 				"OAUTH_ISSUER_URL":         "",
-				"OAUTH_REDIRECT_URL":       "",
 				"MCP_HTTP_LISTEN_ADDR":     "",
 				"AUTH_ALLOWED_EMAILS":      "admin@example.com",
 				"AUTH_ALLOWED_DOMAINS":     "",
 				"AUTH_RESOURCE_SERVER_URI": "https://resource.example",
 			},
 			want: AuthConfig{
+				ClientID:          "client-id",
 				IssuerURL:         "https://accounts.google.com",
-				RedirectURL:       "https://resource.example/auth/callback",
 				ListenAddr:        "127.0.0.1:8080",
 				AllowedEmails:     []string{"admin@example.com"},
 				AllowedDomains:    []string{},
@@ -60,12 +54,22 @@ func TestLoadAuthConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "requires oidc client id",
+			env: map[string]string{
+				"OAUTH_CLIENT_ID":          "",
+				"OAUTH_ISSUER_URL":         "https://issuer.example",
+				"MCP_HTTP_LISTEN_ADDR":     "127.0.0.1:8080",
+				"AUTH_ALLOWED_EMAILS":      "admin@example.com",
+				"AUTH_ALLOWED_DOMAINS":     "",
+				"AUTH_RESOURCE_SERVER_URI": "https://resource.example",
+			},
+			wantErr: "OAUTH_CLIENT_ID",
+		},
+		{
 			name: "rejects empty policy after trimming",
 			env: map[string]string{
 				"OAUTH_CLIENT_ID":          "client-id",
-				"OAUTH_CLIENT_SECRET":      "secret-value",
 				"OAUTH_ISSUER_URL":         "https://issuer.example",
-				"OAUTH_REDIRECT_URL":       "http://127.0.0.1:8080/auth/callback",
 				"MCP_HTTP_LISTEN_ADDR":     "127.0.0.1:8080",
 				"AUTH_ALLOWED_EMAILS":      "   ",
 				"AUTH_ALLOWED_DOMAINS":     "",
@@ -81,9 +85,7 @@ func TestLoadAuthConfig(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, key := range []string{
 				"OAUTH_CLIENT_ID",
-				"OAUTH_CLIENT_SECRET",
 				"OAUTH_ISSUER_URL",
-				"OAUTH_REDIRECT_URL",
 				"MCP_HTTP_LISTEN_ADDR",
 				"AUTH_ALLOWED_EMAILS",
 				"AUTH_ALLOWED_DOMAINS",
@@ -121,16 +123,14 @@ func TestLoadAuthConfigLoadsDotEnv(t *testing.T) {
 	}
 
 	workdir := t.TempDir()
-	content := []byte("OAUTH_CLIENT_ID=from-file\nOAUTH_CLIENT_SECRET=from-file-secret\nOAUTH_ISSUER_URL=https://issuer.from.file\nOAUTH_REDIRECT_URL=http://127.0.0.1:8080/auth/callback\nMCP_HTTP_LISTEN_ADDR=127.0.0.1:8080\nAUTH_ALLOWED_EMAILS= file-user@example.com \nAUTH_ALLOWED_DOMAINS=file.example.com\nAUTH_RESOURCE_SERVER_URI=https://resource.from.file\n")
+	content := []byte("OAUTH_CLIENT_ID=from-file\nOAUTH_ISSUER_URL=https://issuer.from.file\nMCP_HTTP_LISTEN_ADDR=127.0.0.1:8080\nAUTH_ALLOWED_EMAILS= file-user@example.com \nAUTH_ALLOWED_DOMAINS=file.example.com\nAUTH_RESOURCE_SERVER_URI=https://resource.from.file\n")
 	if err := os.WriteFile(filepath.Join(workdir, ".env"), content, 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
 	for _, key := range []string{
 		"OAUTH_CLIENT_ID",
-		"OAUTH_CLIENT_SECRET",
 		"OAUTH_ISSUER_URL",
-		"OAUTH_REDIRECT_URL",
 		"MCP_HTTP_LISTEN_ADDR",
 		"AUTH_ALLOWED_EMAILS",
 		"AUTH_ALLOWED_DOMAINS",
@@ -153,9 +153,7 @@ func TestLoadAuthConfigLoadsDotEnv(t *testing.T) {
 
 	want := AuthConfig{
 		ClientID:          "from-file",
-		ClientSecret:      "from-file-secret",
 		IssuerURL:         "https://issuer.from.file",
-		RedirectURL:       "http://127.0.0.1:8080/auth/callback",
 		ListenAddr:        "127.0.0.1:8080",
 		AllowedEmails:     []string{"file-user@example.com"},
 		AllowedDomains:    []string{"file.example.com"},
@@ -174,15 +172,13 @@ func TestLoadAuthConfigPreservesExplicitEnvAndTrimsQuotedDotEnvValues(t *testing
 	}
 
 	workdir := t.TempDir()
-	content := []byte("OAUTH_CLIENT_ID='from-file'\nOAUTH_CLIENT_SECRET=\"from-file-secret\"\nOAUTH_ISSUER_URL='https://issuer.from.file'\nOAUTH_REDIRECT_URL='http://127.0.0.1:8080/auth/callback'\nMCP_HTTP_LISTEN_ADDR='127.0.0.1:8080'\nAUTH_ALLOWED_EMAILS=' file-user@example.com '\nAUTH_ALLOWED_DOMAINS=\"file.example.com\"\nAUTH_RESOURCE_SERVER_URI='https://resource.from.file'\n")
+	content := []byte("OAUTH_CLIENT_ID='from-file'\nOAUTH_ISSUER_URL='https://issuer.from.file'\nMCP_HTTP_LISTEN_ADDR='127.0.0.1:8080'\nAUTH_ALLOWED_EMAILS=' file-user@example.com '\nAUTH_ALLOWED_DOMAINS=\"file.example.com\"\nAUTH_RESOURCE_SERVER_URI='https://resource.from.file'\n")
 	if err := os.WriteFile(filepath.Join(workdir, ".env"), content, 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
 	t.Setenv("OAUTH_CLIENT_ID", "preset-client-id")
-	t.Setenv("OAUTH_CLIENT_SECRET", "")
 	t.Setenv("OAUTH_ISSUER_URL", "")
-	t.Setenv("OAUTH_REDIRECT_URL", "")
 	t.Setenv("MCP_HTTP_LISTEN_ADDR", "")
 	t.Setenv("AUTH_ALLOWED_EMAILS", "")
 	t.Setenv("AUTH_ALLOWED_DOMAINS", "")
@@ -202,9 +198,7 @@ func TestLoadAuthConfigPreservesExplicitEnvAndTrimsQuotedDotEnvValues(t *testing
 
 	want := AuthConfig{
 		ClientID:          "preset-client-id",
-		ClientSecret:      "from-file-secret",
 		IssuerURL:         "https://issuer.from.file",
-		RedirectURL:       "http://127.0.0.1:8080/auth/callback",
 		ListenAddr:        "127.0.0.1:8080",
 		AllowedEmails:     []string{"file-user@example.com"},
 		AllowedDomains:    []string{"file.example.com"},
@@ -226,9 +220,7 @@ func TestEnvExampleDocumentsAuthSetup(t *testing.T) {
 	text := string(content)
 	for _, want := range []string{
 		"OAUTH_CLIENT_ID=",
-		"OAUTH_CLIENT_SECRET=",
 		"OAUTH_ISSUER_URL=",
-		"OAUTH_REDIRECT_URL=",
 		"MCP_HTTP_LISTEN_ADDR=",
 		"AUTH_RESOURCE_SERVER_URI=",
 		"AUTH_ALLOWED_EMAILS=",

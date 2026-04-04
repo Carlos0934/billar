@@ -6,20 +6,20 @@ import (
 	"testing"
 )
 
-func TestTokenIdentityVerifierVerifyIDToken(t *testing.T) {
+func TestTokenAccessTokenAuthenticatorAuthenticateAccessToken(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		token    string
-		verifier TokenIdentityVerifier
-		want     AuthenticatedIdentity
-		wantErr  error
+		name          string
+		token         string
+		authenticator TokenAccessTokenAuthenticator
+		want          AuthenticatedIdentity
+		wantErr       error
 	}{
 		{
 			name:  "returns the configured verified identity",
 			token: "token-123",
-			verifier: TokenIdentityVerifier{
+			authenticator: TokenAccessTokenAuthenticator{
 				ExpectedToken: "token-123",
 				Identity: AuthenticatedIdentity{
 					Email:         "user@example.com",
@@ -38,11 +38,11 @@ func TestTokenIdentityVerifierVerifyIDToken(t *testing.T) {
 		{
 			name:  "rejects a mismatched raw token",
 			token: "other-token",
-			verifier: TokenIdentityVerifier{
+			authenticator: TokenAccessTokenAuthenticator{
 				ExpectedToken: "token-123",
 				Identity:      AuthenticatedIdentity{Email: "user@example.com"},
 			},
-			wantErr: ErrIdentityTokenMismatch,
+			wantErr: ErrAccessTokenRejected,
 		},
 	}
 
@@ -52,18 +52,18 @@ func TestTokenIdentityVerifierVerifyIDToken(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := tc.verifier.VerifyIDToken(context.Background(), tc.token)
+			got, err := tc.authenticator.AuthenticateAccessToken(context.Background(), tc.token)
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
-					t.Fatalf("VerifyIDToken() error = %v, want %v", err, tc.wantErr)
+					t.Fatalf("AuthenticateAccessToken() error = %v, want %v", err, tc.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("VerifyIDToken() error = %v", err)
+				t.Fatalf("AuthenticateAccessToken() error = %v", err)
 			}
 			if got != tc.want {
-				t.Fatalf("VerifyIDToken() = %+v, want %+v", got, tc.want)
+				t.Fatalf("AuthenticateAccessToken() = %+v, want %+v", got, tc.want)
 			}
 		})
 	}

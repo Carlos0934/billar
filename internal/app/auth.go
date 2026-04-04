@@ -7,15 +7,10 @@ import (
 )
 
 var (
-	ErrIdentityTokenMismatch = errors.New("identity token mismatch")
-	ErrUnauthorizedIdentity  = errors.New("unauthorized identity")
+	ErrAccessTokenRejected  = errors.New("access token rejected")
+	ErrUnauthorizedIdentity = errors.New("unauthorized identity")
+	ErrEmailNotVerified     = errors.New("email not verified")
 )
-
-type SessionDTO struct {
-	ID        string
-	Email     string
-	ExpiresAt string
-}
 
 type AuthenticatedIdentity struct {
 	Email         string
@@ -24,32 +19,27 @@ type AuthenticatedIdentity struct {
 	Issuer        string
 }
 
-type HandleOAuthCallbackCommand struct {
-	Code  string
-	State string
-}
-
 type OAuthChallengeDTO struct {
 	ResourceURI          string
 	AuthorizationServers []string
 }
 
-type IdentityVerifier interface {
-	VerifyIDToken(ctx context.Context, rawToken string) (AuthenticatedIdentity, error)
+type AccessTokenAuthenticator interface {
+	AuthenticateAccessToken(ctx context.Context, rawToken string) (AuthenticatedIdentity, error)
 }
 
-type TokenIdentityVerifier struct {
+type TokenAccessTokenAuthenticator struct {
 	ExpectedToken string
 	Identity      AuthenticatedIdentity
 }
 
-func (v TokenIdentityVerifier) VerifyIDToken(ctx context.Context, rawToken string) (AuthenticatedIdentity, error) {
+func (v TokenAccessTokenAuthenticator) AuthenticateAccessToken(ctx context.Context, rawToken string) (AuthenticatedIdentity, error) {
 	if err := ctx.Err(); err != nil {
 		return AuthenticatedIdentity{}, err
 	}
 
 	if strings.TrimSpace(rawToken) != strings.TrimSpace(v.ExpectedToken) {
-		return AuthenticatedIdentity{}, ErrIdentityTokenMismatch
+		return AuthenticatedIdentity{}, ErrAccessTokenRejected
 	}
 
 	return v.Identity, nil
@@ -67,6 +57,10 @@ type AccessPolicy interface {
 type IdentityPolicy struct {
 	AllowedEmails  []string
 	AllowedDomains []string
+}
+
+func (p IdentityPolicy) HasRules() bool {
+	return len(p.AllowedEmails) > 0 || len(p.AllowedDomains) > 0
 }
 
 func (p IdentityPolicy) IsAllowed(email string) bool {

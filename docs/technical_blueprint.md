@@ -11,7 +11,7 @@ This system is a Go application for managing:
 * invoice PDF rendering
 * CLI execution
 * MCP tool execution
-* local session-based access
+* request-authenticated protected access
 
 This baseline stays intentionally pragmatic.
 
@@ -71,8 +71,8 @@ The main objective is to support a reliable hourly billing flow with a clean int
 * Single local operator
 * OAuth/OIDC-based authentication
 * Allow access by exact email allowlist and allowed email domains
-* Session gate required before protected operations
-* Session stores authenticated user identity
+* MCP HTTP protected operations require bearer-authenticated request identity
+* CLI and stdio may use an explicit local identity bypass for protected operations when configured
 
 ### Billing model
 
@@ -155,8 +155,7 @@ Includes:
 * create invoice draft
 * issue invoice
 * render invoice pdf
-* inspect current session state
-* handle auth callback/runtime for development and testing
+* inspect current authenticated identity state
 * validate authenticated access
 
 ## 5.3 Connectors
@@ -180,10 +179,8 @@ Includes:
 * SQLite access
 * repositories/store layer
 * OAuth/OIDC integration
-* session persistence
 * PDF renderer
 * config loading
-* local HTTP auth server for OAuth/OIDC callback handling during development
 
 ---
 
@@ -358,11 +355,10 @@ Represents current access state.
 
 ### Rules
 
-* no protected operation before session login
-* login requires valid OAuth/OIDC identity
-* only allowed emails or allowed domains can authenticate session
-* logout invalidates protected access
-* CLI and MCP operations that need storage must fail fast if logouted
+* no protected operation before authenticated identity is present
+* MCP HTTP requires valid bearer-authenticated OAuth/OIDC identity on each request
+* only allowed emails or allowed domains can access protected operations
+* CLI and stdio protected operations may use an explicit local bypass identity for local execution
 
 ---
 
@@ -441,10 +437,6 @@ Keep the app surface small and explicit.
 
 ## 8.1 Access
 
-* `StartLogin`
-* `HandleOAuthCallback`
-* `AuthenticateSession`
-* `Logout`
 * `GetSessionStatus`
 * `ValidateAccess`
 
@@ -524,10 +516,6 @@ type InvoiceService interface {
 }
 
 type SessionService interface {
-    StartLogin(ctx context.Context) (LoginURLDTO, error)
-    HandleOAuthCallback(ctx context.Context, cmd HandleOAuthCallbackCommand) (SessionDTO, error)
-    AuthenticateSession(ctx context.Context, rawToken string) (SessionDTO, error)
-    Logout(ctx context.Context) error
     Status(ctx context.Context) (SessionDTO, error)
     ValidateAccess(ctx context.Context) (bool, error)
 }
@@ -851,8 +839,8 @@ Fallback if direct drawing is needed:
 
 Build the first end-to-end billing loop:
 
-1. authenticate/login
-2. establish session
+1. authenticate with a compatible MCP client or local CLI bypass
+2. establish authenticated access context
 3. configure issuer profile
 4. create customer
 5. create service agreement
@@ -914,7 +902,8 @@ Development default for the first runnable auth surface: Google OIDC with a loop
 * OAuth/OIDC login required
 * allow exact email matches and allowed domains
 * MCP may additionally enforce optional ingress IP allowlists by config
-* MCP clients own their interactive auth flow; Billar exposes session inspection and preserves the HTTP callback/runtime for development and testing
+* MCP clients own their interactive auth flow; Billar only verifies bearer tokens and exposes protected-resource metadata on HTTP
+* CLI and stdio do not use a session runtime; protected operations may opt into a local explicit bypass identity
 * single operator scope for now
 
 ### Invoice generation

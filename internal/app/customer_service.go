@@ -8,36 +8,36 @@ import (
 	"github.com/Carlos0934/billar/internal/core"
 )
 
-var ErrCustomerListAccessDenied = errors.New("customer list requires an active session")
+var ErrCustomerListAccessDenied = errors.New("customer list requires an authenticated identity")
 
 type CustomerStore interface {
 	List(ctx context.Context, query ListQuery) (ListResult[core.Customer], error)
 }
 
 type CustomerService struct {
-	sessions SessionStore
-	store    CustomerStore
+	identities AuthenticatedIdentitySource
+	store      CustomerStore
 }
 
-func NewCustomerService(sessions SessionStore, store CustomerStore) CustomerService {
-	return CustomerService{sessions: sessions, store: store}
+func NewCustomerService(identities AuthenticatedIdentitySource, store CustomerStore) CustomerService {
+	return CustomerService{identities: identities, store: store}
 }
 
 func (s CustomerService) List(ctx context.Context, query ListQuery) (ListResult[CustomerDTO], error) {
 	query = query.Normalize()
 
-	if s.sessions == nil {
-		return ListResult[CustomerDTO]{}, errors.New("customer session store is required")
+	if s.identities == nil {
+		return ListResult[CustomerDTO]{}, errors.New("customer authenticated identity source is required")
 	}
 	if s.store == nil {
 		return ListResult[CustomerDTO]{}, errors.New("customer store is required")
 	}
 
-	session, err := s.sessions.GetCurrent(ctx)
+	_, ok, err := s.identities.CurrentIdentity(ctx)
 	if err != nil {
-		return ListResult[CustomerDTO]{}, fmt.Errorf("load current session: %w", err)
+		return ListResult[CustomerDTO]{}, fmt.Errorf("load authenticated identity: %w", err)
 	}
-	if session == nil || session.Status != core.SessionStatusActive {
+	if !ok {
 		return ListResult[CustomerDTO]{}, ErrCustomerListAccessDenied
 	}
 

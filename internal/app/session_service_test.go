@@ -8,10 +8,6 @@ import (
 
 type sessionServiceStub struct{}
 
-func (sessionServiceStub) StartLogin(context.Context) (LoginIntentDTO, error) {
-	return LoginIntentDTO{LoginURL: "https://login.example"}, nil
-}
-
 func (sessionServiceStub) Status(context.Context) (SessionStatusDTO, error) {
 	return SessionStatusDTO{
 		Status:        "active",
@@ -22,22 +18,10 @@ func (sessionServiceStub) Status(context.Context) (SessionStatusDTO, error) {
 	}, nil
 }
 
-func (sessionServiceStub) Logout(context.Context) (LogoutDTO, error) {
-	return LogoutDTO{Message: "logged out"}, nil
-}
-
 func TestSessionServiceInterfaceSatisfaction(t *testing.T) {
 	t.Parallel()
 
 	var svc SessionService = sessionServiceStub{}
-
-	login, err := svc.StartLogin(context.Background())
-	if err != nil {
-		t.Fatalf("StartLogin() error = %v", err)
-	}
-	if login.LoginURL != "https://login.example" {
-		t.Fatalf("StartLogin() = %+v, want login URL", login)
-	}
 
 	status, err := svc.Status(context.Background())
 	if err != nil {
@@ -45,14 +29,6 @@ func TestSessionServiceInterfaceSatisfaction(t *testing.T) {
 	}
 	if status.Status != "active" || status.Email != "user@example.com" || !status.EmailVerified {
 		t.Fatalf("Status() = %+v, want active identity", status)
-	}
-
-	logout, err := svc.Logout(context.Background())
-	if err != nil {
-		t.Fatalf("Logout() error = %v", err)
-	}
-	if logout.Message != "logged out" {
-		t.Fatalf("Logout() = %+v, want message", logout)
 	}
 }
 
@@ -65,13 +41,6 @@ func TestSessionDTOFieldTags(t *testing.T) {
 		wantTags map[string]string
 	}{
 		{
-			name:   "login intent",
-			typeOf: LoginIntentDTO{},
-			wantTags: map[string]string{
-				"LoginURL": `json:"login_url" toon:"login_url"`,
-			},
-		},
-		{
 			name:   "session status",
 			typeOf: SessionStatusDTO{},
 			wantTags: map[string]string{
@@ -80,13 +49,6 @@ func TestSessionDTOFieldTags(t *testing.T) {
 				"EmailVerified": `json:"email_verified,omitempty" toon:"email_verified,omitempty"`,
 				"Subject":       `json:"subject,omitempty" toon:"subject,omitempty"`,
 				"Issuer":        `json:"issuer,omitempty" toon:"issuer,omitempty"`,
-			},
-		},
-		{
-			name:   "logout",
-			typeOf: LogoutDTO{},
-			wantTags: map[string]string{
-				"Message": `json:"message" toon:"message"`,
 			},
 		},
 	}

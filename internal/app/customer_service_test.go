@@ -11,35 +11,14 @@ import (
 	"github.com/Carlos0934/billar/internal/core"
 )
 
-type customerSessionStoreStub struct {
-	session *core.Session
-	getErr  error
-	saved   *core.Session
+type customerIdentitySourceStub struct {
+	identity AuthenticatedIdentity
+	ok       bool
+	err      error
 }
 
-func (s *customerSessionStoreStub) Save(ctx context.Context, session *core.Session) error {
-	_ = ctx
-	if session == nil {
-		s.saved = nil
-		s.session = nil
-		return nil
-	}
-	copy := *session
-	s.saved = &copy
-	s.session = &copy
-	return nil
-}
-
-func (s *customerSessionStoreStub) GetCurrent(ctx context.Context) (*core.Session, error) {
-	_ = ctx
-	if s.getErr != nil {
-		return nil, s.getErr
-	}
-	if s.session == nil {
-		return nil, nil
-	}
-	copy := *s.session
-	return &copy, nil
+func (s customerIdentitySourceStub) CurrentIdentity(context.Context) (AuthenticatedIdentity, bool, error) {
+	return s.identity, s.ok, s.err
 }
 
 type customerStoreStub struct {
@@ -64,7 +43,7 @@ func TestCustomerServiceList(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		session      *core.Session
+		identityOK   bool
 		query        ListQuery
 		storeResult  ListResult[core.Customer]
 		wantQuery    ListQuery
@@ -73,8 +52,8 @@ func TestCustomerServiceList(t *testing.T) {
 		wantStoreHit bool
 	}{
 		{
-			name:    "returns mapped list for active session",
-			session: &core.Session{Status: core.SessionStatusActive},
+			name:       "returns mapped list for authenticated identity",
+			identityOK: true,
 			query: ListQuery{
 				Page:      0,
 				PageSize:  500,
@@ -128,10 +107,9 @@ func TestCustomerServiceList(t *testing.T) {
 			wantStoreHit: true,
 		},
 		{
-			name:         "rejects inactive session before hitting store",
-			session:      &core.Session{Status: core.SessionStatusUnauthenticated},
+			name:         "rejects missing identity before hitting store",
 			query:        ListQuery{Page: 3, PageSize: 5, Search: "Acme"},
-			wantErr:      "active session",
+			wantErr:      "authenticated identity",
 			wantResult:   ListResult[CustomerDTO]{},
 			wantQuery:    ListQuery{},
 			wantStoreHit: false,
@@ -143,9 +121,9 @@ func TestCustomerServiceList(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			sessions := &customerSessionStoreStub{session: tc.session}
+			identities := customerIdentitySourceStub{identity: AuthenticatedIdentity{Email: "user@example.com", EmailVerified: true}, ok: tc.identityOK}
 			store := &customerStoreStub{result: tc.storeResult}
-			svc := NewCustomerService(sessions, store)
+			svc := NewCustomerService(identities, store)
 
 			got, err := svc.List(context.Background(), tc.query)
 			if tc.wantErr != "" {

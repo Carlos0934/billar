@@ -9,6 +9,19 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+type contextAwareCustomerProvider struct{}
+
+func (contextAwareCustomerProvider) List(ctx context.Context, _ app.ListQuery) (app.ListResult[app.CustomerDTO], error) {
+	identity, ok, err := (app.ContextIdentitySource{}).CurrentIdentity(ctx)
+	if err != nil {
+		return app.ListResult[app.CustomerDTO]{}, err
+	}
+	if !ok || identity.Email != "user@example.com" {
+		return app.ListResult[app.CustomerDTO]{}, app.ErrCustomerListAccessDenied
+	}
+	return app.ListResult[app.CustomerDTO]{}, nil
+}
+
 type customerListServiceStub struct {
 	called bool
 	query  app.ListQuery
@@ -48,8 +61,7 @@ func TestCustomerListToolHandlers(t *testing.T) {
 
 	_, handler := customerListTool(service, guard, nil)
 	result, err := handler(context.Background(), mcp.CallToolRequest{Header: headerWithValues(map[string]string{
-		"X-Forwarded-For":       "127.0.0.1",
-		"X-Authenticated-Email": "user@example.com",
+		"X-Forwarded-For": "127.0.0.1",
 	}), Params: mcp.CallToolParams{Name: "customer.list", Arguments: map[string]any{
 		"search":    "  Acme  ",
 		"sort":      "created_at:desc",
@@ -85,8 +97,7 @@ func TestCustomerListToolHandlersRejectIngress(t *testing.T) {
 
 	_, handler := customerListTool(service, guard, nil)
 	result, err := handler(context.Background(), mcp.CallToolRequest{Header: headerWithValues(map[string]string{
-		"X-Forwarded-For":       "192.0.2.10",
-		"X-Authenticated-Email": "blocked@example.com",
+		"X-Forwarded-For": "192.0.2.10",
 	}), Params: mcp.CallToolParams{Name: "customer.list"}})
 	if err != nil {
 		t.Fatalf("handler error = %v", err)
@@ -96,6 +107,20 @@ func TestCustomerListToolHandlersRejectIngress(t *testing.T) {
 	}
 	if service.called {
 		t.Fatal("List() was called for rejected request")
+	}
+}
+
+func TestCustomerListToolUsesContextAuthenticatedIdentity(t *testing.T) {
+	t.Parallel()
+
+	service := contextAwareCustomerProvider{}
+	_, handler := customerListTool(service, NewIngressGuard(nil), nil)
+	result, err := handler(app.WithAuthenticatedIdentity(context.Background(), app.AuthenticatedIdentity{Email: "user@example.com", EmailVerified: true}), mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "customer.list"}})
+	if err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("handler result = %+v, want success result", result)
 	}
 }
 

@@ -7,8 +7,6 @@ import (
 
 	"github.com/Carlos0934/billar/internal/app"
 	connectorcli "github.com/Carlos0934/billar/internal/connectors/cli"
-	"github.com/Carlos0934/billar/internal/core"
-	infraauth "github.com/Carlos0934/billar/internal/infra/auth"
 	"github.com/Carlos0934/billar/internal/infra/config"
 	infrasqlite "github.com/Carlos0934/billar/internal/infra/sqlite"
 )
@@ -27,12 +25,16 @@ func main() {
 		}
 	}()
 
-	sessionStore := infraauth.NewMemorySessionStore()
-	if email := os.Getenv("BILLAR_SESSION_EMAIL"); email != "" {
-		_ = sessionStore.Save(ctx, &core.Session{Status: core.SessionStatusActive, Identity: core.Identity{Email: email, EmailVerified: true}})
+	identities, err := app.NewLocalBypassIdentitySource(os.Getenv("BILLAR_LOCAL_AUTH_EMAIL"), app.IdentityPolicy{
+		AllowedEmails:  cfg.AccessPolicy.AllowedEmails,
+		AllowedDomains: cfg.AccessPolicy.AllowedDomains,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 
-	cmd := connectorcli.NewCommand(app.NewHealthService(cfg.AppName), app.NewCustomerService(sessionStore, infrasqlite.NewCustomerStore(store)), cfg.ColorEnabled)
+	cmd := connectorcli.NewCommand(app.NewHealthService(cfg.AppName), app.NewCustomerService(identities, infrasqlite.NewCustomerStore(store)), cfg.ColorEnabled)
 
 	if err := cmd.Run(ctx, os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)

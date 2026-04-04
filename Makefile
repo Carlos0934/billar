@@ -10,7 +10,7 @@ run-health:
 	go run ./cmd/cli health
 
 run-customer-list:
-	BILLAR_SESSION_EMAIL=local@billar.dev go run ./cmd/cli customer list
+	BILLAR_LOCAL_AUTH_EMAIL=local@billar.dev go run ./cmd/cli customer list
 
 run-mcp-http:
 	go run ./cmd/mcp-http

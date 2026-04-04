@@ -20,7 +20,6 @@ import (
 )
 
 func main() {
-	ctx := context.Background()
 	logger := logging.New()
 	authCfg, err := config.LoadAuthConfig()
 	if err != nil {
@@ -29,22 +28,14 @@ func main() {
 	}
 	appCfg := config.Load()
 
-	googleOIDC, err := infraauth.NewGoogleOIDC(ctx, authCfg.IssuerURL, authCfg.ClientID, authCfg.ClientSecret, authCfg.RedirectURL)
+	googleAccessTokenAuthenticator, err := infraauth.NewGoogleAccessTokenAuthenticator(authCfg.IssuerURL, authCfg.ClientID)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	stateStore := infraauth.NewMemoryStateStore(10 * time.Minute)
-	sessionStore := infraauth.NewMemorySessionStore()
-	sessionService := app.NewAuthSessionService(
-		googleOIDC,
-		googleOIDC,
-		googleOIDC,
-		app.IdentityPolicy{AllowedEmails: authCfg.AllowedEmails, AllowedDomains: authCfg.AllowedDomains},
-		stateStore,
-		sessionStore,
-	)
+	identityPolicy := app.IdentityPolicy{AllowedEmails: authCfg.AllowedEmails, AllowedDomains: authCfg.AllowedDomains}
+	requestAuthService := app.NewRequestAuthService(googleAccessTokenAuthenticator, identityPolicy)
 	customerStore, err := infrasqlite.Open(os.Getenv("BILLAR_DB_PATH"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -55,21 +46,20 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}()
-	customerService := app.NewCustomerService(sessionStore, infrasqlite.NewCustomerStore(customerStore))
+	mcpSessionService := app.NewRequestSessionService(app.ContextIdentitySource{})
+	customerService := app.NewCustomerService(app.ContextIdentitySource{}, infrasqlite.NewCustomerStore(customerStore))
 	healthService := app.NewHealthService(appCfg.AppName)
-	mcpServer := mcpconnector.NewServer(sessionService, customerService, mcpconnector.NewIngressGuardFromConfig(appCfg.AccessPolicy), logger)
+	mcpChallenge := app.OAuthChallengeDTO{
+		ResourceURI:          authCfg.ResourceServerURI,
+		AuthorizationServers: []string{authCfg.IssuerURL},
+	}
+	mcpServer := mcpconnector.NewServer(mcpSessionService, customerService, mcpconnector.NewIngressGuardFromConfig(appCfg.AccessPolicy), logger)
+	mcpAuthMiddleware := mcphttpconnector.NewMCPHTTPAuthMiddleware(requestAuthService, mcpChallenge, logger)
 
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", mcphttpconnector.HealthHandler(healthService))
-	mux.Handle("/v1/mcp", mcpServer.HTTPHandler())
-	mux.Handle("/.well-known/oauth-protected-resource", mcphttpconnector.MetadataHandler(app.OAuthChallengeDTO{
-		ResourceURI:          authCfg.ResourceServerURI,
-		AuthorizationServers: []string{authCfg.IssuerURL},
-	}))
-	mux.Handle("/auth/login/start", mcphttpconnector.LoginHandler(sessionService, logger))
-	mux.Handle("/auth/callback", mcphttpconnector.CallbackHandler(sessionService, stateStore, logger))
-	mux.Handle("/auth/session", mcphttpconnector.SessionStatusHandler(sessionService, logger))
-	mux.Handle("/auth/logout", mcphttpconnector.LogoutHandler(sessionService, logger))
+	mux.Handle("/v1/mcp", mcpAuthMiddleware.Wrap(mcpServer.HTTPHandler()))
+	mux.Handle("/.well-known/oauth-protected-resource", mcphttpconnector.MetadataHandler(mcpChallenge))
 
 	server := &http.Server{
 		Addr:              authCfg.ListenAddr,
