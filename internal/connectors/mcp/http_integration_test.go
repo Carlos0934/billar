@@ -38,20 +38,24 @@ func TestMCPServerOverHTTPUsesRequestAuthenticatedIdentity(t *testing.T) {
 	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
 	server := NewServer(
 		app.NewRequestSessionService(app.ContextIdentitySource{}),
-		&customerListServiceStub{result: app.ListResult[app.CustomerDTO]{
-			Items: []app.CustomerDTO{{
-				ID:              "cus_123",
-				Type:            "company",
-				LegalName:       "Acme SRL",
-				Status:          "active",
-				DefaultCurrency: "USD",
-				CreatedAt:       "2026-04-03T10:00:00Z",
-				UpdatedAt:       "2026-04-03T10:05:00Z",
-			}},
-			Total:    1,
-			Page:     1,
-			PageSize: 20,
-		}},
+		&customerWriteServiceStub{
+			customerListServiceStub: customerListServiceStub{
+				result: app.ListResult[app.CustomerDTO]{
+					Items: []app.CustomerDTO{{
+						ID:              "cus_123",
+						Type:            "company",
+						LegalName:       "Acme SRL",
+						Status:          "active",
+						DefaultCurrency: "USD",
+						CreatedAt:       "2026-04-03T10:00:00Z",
+						UpdatedAt:       "2026-04-03T10:05:00Z",
+					}},
+					Total:    1,
+					Page:     1,
+					PageSize: 20,
+				},
+			},
+		},
 		NewIngressGuard(nil),
 		nil,
 	)
@@ -105,7 +109,7 @@ func TestMCPServerOverHTTPUsesRequestAuthenticatedIdentity(t *testing.T) {
 	for _, tool := range toolsResult.Tools {
 		gotToolNames = append(gotToolNames, tool.Name)
 	}
-	if wantToolNames := []string{"customer.list", "session.status"}; !reflect.DeepEqual(gotToolNames, wantToolNames) {
+	if wantToolNames := []string{"customer.create", "customer.delete", "customer.list", "customer.update", "session.status"}; !reflect.DeepEqual(gotToolNames, wantToolNames) {
 		t.Fatalf("ListTools() names = %v, want %v", gotToolNames, wantToolNames)
 	}
 
@@ -136,7 +140,7 @@ func TestMCPServerOverHTTPRejectsUnauthenticatedRequests(t *testing.T) {
 	t.Parallel()
 
 	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
-	server := NewServer(app.NewRequestSessionService(app.ContextIdentitySource{}), &customerListServiceStub{}, NewIngressGuard(nil), nil)
+	server := NewServer(app.NewRequestSessionService(app.ContextIdentitySource{}), &customerWriteServiceStub{}, NewIngressGuard(nil), nil)
 	httpServer := httptest.NewServer(mcphttpconnector.NewMCPHTTPAuthMiddleware(authenticatedHTTPTestAuthenticator{token: "token-123"}, challenge, nil).Wrap(server.HTTPHandler()))
 	t.Cleanup(httpServer.Close)
 

@@ -81,6 +81,22 @@ type CustomerParams struct {
 	Notes          string
 }
 
+// CustomerPatch defines optional updates for a customer.
+// Nil pointers mean the field should be skipped (not updated).
+// Non-nil pointers (even if empty string) mean the field should be applied.
+type CustomerPatch struct {
+	Type            *CustomerType
+	LegalName       *string
+	TradeName       *string
+	TaxID           *string
+	Email           *string
+	Phone           *string
+	Website         *string
+	BillingAddress  *Address
+	Notes           *string
+	DefaultCurrency *string
+}
+
 func NewCustomer(params CustomerParams) (Customer, error) {
 	if strings.TrimSpace(params.LegalName) == "" {
 		return Customer{}, errors.New("customer legal name is required")
@@ -116,6 +132,78 @@ func NewCustomer(params CustomerParams) (Customer, error) {
 
 func (c *Customer) CanReceiveInvoices() bool {
 	return c != nil && c.Status == CustomerStatusActive
+}
+
+// ApplyPatch applies the given patch to the customer.
+// Nil pointers in the patch mean the field should be skipped.
+// Non-nil pointers (even if empty string) mean the field should be applied.
+// The method updates the UpdatedAt timestamp if any field was changed.
+func (c *Customer) ApplyPatch(patch CustomerPatch) {
+	changed := false
+
+	if patch.Type != nil {
+		c.Type = *patch.Type
+		changed = true
+	}
+	if patch.LegalName != nil {
+		c.LegalName = *patch.LegalName
+		changed = true
+	}
+	if patch.TradeName != nil {
+		c.TradeName = *patch.TradeName
+		changed = true
+	}
+	if patch.TaxID != nil {
+		c.TaxID = *patch.TaxID
+		changed = true
+	}
+	if patch.Email != nil {
+		c.Email = *patch.Email
+		changed = true
+	}
+	if patch.Phone != nil {
+		c.Phone = *patch.Phone
+		changed = true
+	}
+	if patch.Website != nil {
+		c.Website = *patch.Website
+		changed = true
+	}
+	if patch.BillingAddress != nil {
+		c.BillingAddress = *patch.BillingAddress
+		changed = true
+	}
+	if patch.Notes != nil {
+		c.Notes = *patch.Notes
+		changed = true
+	}
+	if patch.DefaultCurrency != nil {
+		c.DefaultCurrency = *patch.DefaultCurrency
+		changed = true
+	}
+
+	if changed {
+		c.UpdatedAt = time.Now().UTC()
+	}
+}
+
+// Validate checks whether the customer is in a valid state.
+// This is used to re-validate after patches to ensure invariants are maintained.
+func (c Customer) Validate() error {
+	if strings.TrimSpace(c.LegalName) == "" {
+		return errors.New("customer legal name is required")
+	}
+	if !c.Type.IsValid() {
+		return fmt.Errorf("invalid customer type: %s", c.Type)
+	}
+	return nil
+}
+
+// ValidateDelete checks whether the customer can be deleted.
+// This is a seam for future relationship-protection logic (e.g., blocking
+// deletion if the customer has invoices). Currently always returns nil.
+func (c Customer) ValidateDelete() error {
+	return nil
 }
 
 func generateCustomerID() string {

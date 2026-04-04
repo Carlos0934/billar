@@ -108,3 +108,15 @@ type routeCustomerServiceStub struct {
 func (s routeCustomerServiceStub) List(context.Context, app.ListQuery) (app.ListResult[app.CustomerDTO], error) {
 	return s.result, nil
 }
+
+func (s routeCustomerServiceStub) Create(context.Context, app.CreateCustomerCommand) (app.CustomerDTO, error) {
+	return app.CustomerDTO{}, nil
+}
+
+func (s routeCustomerServiceStub) Update(context.Context, string, app.PatchCustomerCommand) (app.CustomerDTO, error) {
+	return app.CustomerDTO{}, nil
+}
+
+func (s routeCustomerServiceStub) Delete(context.Context, string) error {
+	return nil
+}

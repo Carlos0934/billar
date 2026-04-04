@@ -66,3 +66,32 @@ func formatCustomerTime(value time.Time) string {
 	}
 	return value.UTC().Format(time.RFC3339)
 }
+
+// CreateCustomerCommand represents the input for creating a customer.
+type CreateCustomerCommand struct {
+	Type            string     `json:"type"`
+	LegalName       string     `json:"legal_name"`
+	TradeName       string     `json:"trade_name"`
+	TaxID           string     `json:"tax_id"`
+	Email           string     `json:"email"`
+	Phone           string     `json:"phone"`
+	Website         string     `json:"website"`
+	BillingAddress  AddressDTO `json:"billing_address"`
+	Notes           string     `json:"notes"`
+	DefaultCurrency string     `json:"default_currency"`
+}
+
+// PatchCustomerCommand represents a partial update to a customer.
+// Pointer fields distinguish between "not sent" (nil) and "clear field" (empty string).
+type PatchCustomerCommand struct {
+	Type            *string     `json:"type,omitempty"`
+	LegalName       *string     `json:"legal_name,omitempty"`
+	TradeName       *string     `json:"trade_name,omitempty"`
+	TaxID           *string     `json:"tax_id,omitempty"`
+	Email           *string     `json:"email,omitempty"`
+	Phone           *string     `json:"phone,omitempty"`
+	Website         *string     `json:"website,omitempty"`
+	BillingAddress  *AddressDTO `json:"billing_address,omitempty"`
+	Notes           *string     `json:"notes,omitempty"`
+	DefaultCurrency *string     `json:"default_currency,omitempty"`
+}

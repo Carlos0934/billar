@@ -19,15 +19,22 @@ type CustomerListProvider interface {
 	List(ctx context.Context, query app.ListQuery) (app.ListResult[app.CustomerDTO], error)
 }
 
+type CustomerServiceProvider interface {
+	CustomerListProvider
+	Create(ctx context.Context, cmd app.CreateCustomerCommand) (app.CustomerDTO, error)
+	Update(ctx context.Context, id string, cmd app.PatchCustomerCommand) (app.CustomerDTO, error)
+	Delete(ctx context.Context, id string) error
+}
+
 type Command struct {
 	health       HealthStatusProvider
-	customer     CustomerListProvider
+	customer     CustomerServiceProvider
 	colorEnabled bool
 }
 
-const commandUsage = "usage: billar <health|status|customer list> [flags]"
+const commandUsage = "usage: billar <health|status|customer list|customer create|customer update|customer delete> [flags]"
 
-func NewCommand(health HealthStatusProvider, customer CustomerListProvider, colorEnabled bool) Command {
+func NewCommand(health HealthStatusProvider, customer CustomerServiceProvider, colorEnabled bool) Command {
 	return Command{health: health, customer: customer, colorEnabled: colorEnabled}
 }
 
@@ -78,36 +85,110 @@ func (c Command) runCustomer(ctx context.Context, args []string, out io.Writer) 
 	}
 
 	subcommand := strings.ToLower(args[0])
-	if subcommand != "list" {
-		return fmt.Errorf("unknown command %q", strings.Join([]string{"customer", args[0]}, " "))
-	}
 	if c.customer == nil {
 		return errors.New("customer service is required")
 	}
 
-	query, format, err := parseCustomerListFlags(args[1:])
-	if err != nil {
-		return err
-	}
-	query = query.Normalize()
+	switch subcommand {
+	case "list":
+		query, format, err := parseCustomerListFlags(args[1:])
+		if err != nil {
+			return err
+		}
+		query = query.Normalize()
 
-	result, err := c.customer.List(ctx, query)
-	if err != nil {
-		return fmt.Errorf("run customer list command: %w", err)
-	}
+		result, err := c.customer.List(ctx, query)
+		if err != nil {
+			return fmt.Errorf("run customer list command: %w", err)
+		}
 
-	output := OutputResult{
-		Payload: result,
-		TextWriter: func(w io.Writer) error {
-			return writeCustomerListText(w, result, c.colorEnabled)
-		},
-	}
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeCustomerListText(w, result, c.colorEnabled)
+			},
+		}
 
-	if err := WriteOutput(out, format, output); err != nil {
-		return fmt.Errorf("write customer list output: %w", err)
-	}
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write customer list output: %w", err)
+		}
 
-	return nil
+		return nil
+
+	case "create":
+		cmd, format, err := parseCustomerCreateFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.customer.Create(ctx, cmd)
+		if err != nil {
+			return fmt.Errorf("run customer create command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeCustomerCreateText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write customer create output: %w", err)
+		}
+
+		return nil
+
+	case "update":
+		id, cmd, format, err := parseCustomerUpdateFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.customer.Update(ctx, id, cmd)
+		if err != nil {
+			return fmt.Errorf("run customer update command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeCustomerUpdateText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write customer update output: %w", err)
+		}
+
+		return nil
+
+	case "delete":
+		id, format, err := parseCustomerDeleteFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		if err := c.customer.Delete(ctx, id); err != nil {
+			return fmt.Errorf("run customer delete command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: map[string]string{"id": id, "status": "deleted"},
+			TextWriter: func(w io.Writer) error {
+				return writeCustomerDeleteText(w, id, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write customer delete output: %w", err)
+		}
+
+		return nil
+
+	default:
+		return fmt.Errorf("unknown command %q", strings.Join([]string{"customer", args[0]}, " "))
+	}
 }
 
 func parseFormatFlag(name string, args []string) (Format, error) {

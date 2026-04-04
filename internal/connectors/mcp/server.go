@@ -19,7 +19,14 @@ type CustomerListProvider interface {
 	List(ctx context.Context, query app.ListQuery) (app.ListResult[app.CustomerDTO], error)
 }
 
-func NewServer(sessionService app.SessionService, customerService CustomerListProvider, guard IngressGuard, logger *slog.Logger) *Server {
+type CustomerServiceProvider interface {
+	CustomerListProvider
+	Create(ctx context.Context, cmd app.CreateCustomerCommand) (app.CustomerDTO, error)
+	Update(ctx context.Context, id string, cmd app.PatchCustomerCommand) (app.CustomerDTO, error)
+	Delete(ctx context.Context, id string) error
+}
+
+func NewServer(sessionService app.SessionService, customerService CustomerServiceProvider, guard IngressGuard, logger *slog.Logger) *Server {
 	mcpServer := mcpsrv.NewMCPServer(
 		"Billar MCP Session Surface",
 		"1.0.0",

@@ -150,3 +150,83 @@ func scanCustomer(row customerRowScanner) (core.Customer, error) {
 
 	return customer, nil
 }
+
+func (s *CustomerStore) Save(ctx context.Context, customer *core.Customer) error {
+	if s == nil || s.db == nil {
+		return errors.New("customer sqlite store is required")
+	}
+	if customer == nil {
+		return errors.New("customer is required")
+	}
+
+	billing, err := json.Marshal(customer.BillingAddress)
+	if err != nil {
+		return fmt.Errorf("encode billing address: %w", err)
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+INSERT OR REPLACE INTO customers (
+	id, type, legal_name, trade_name, tax_id, email, phone, website, billing_address, status, default_currency, notes, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		customer.ID,
+		string(customer.Type),
+		customer.LegalName,
+		customer.TradeName,
+		customer.TaxID,
+		customer.Email,
+		customer.Phone,
+		customer.Website,
+		string(billing),
+		string(customer.Status),
+		customer.DefaultCurrency,
+		customer.Notes,
+		customer.CreatedAt.UTC().UnixNano(),
+		customer.UpdatedAt.UTC().UnixNano(),
+	)
+	if err != nil {
+		return fmt.Errorf("save customer: %w", err)
+	}
+
+	return nil
+}
+
+func (s *CustomerStore) GetByID(ctx context.Context, id string) (*core.Customer, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("customer sqlite store is required")
+	}
+
+	query := `SELECT id, type, legal_name, trade_name, tax_id, email, phone, website, billing_address, status, default_currency, notes, created_at, updated_at FROM customers WHERE id = ?`
+	row := s.db.QueryRowContext(ctx, query, id)
+
+	customer, err := scanCustomer(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, app.ErrCustomerNotFound
+		}
+		return nil, fmt.Errorf("get customer by id: %w", err)
+	}
+
+	return &customer, nil
+}
+
+func (s *CustomerStore) Delete(ctx context.Context, id string) error {
+	if s == nil || s.db == nil {
+		return errors.New("customer sqlite store is required")
+	}
+
+	result, err := s.db.ExecContext(ctx, "DELETE FROM customers WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("delete customer: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return app.ErrCustomerNotFound
+	}
+
+	return nil
+}

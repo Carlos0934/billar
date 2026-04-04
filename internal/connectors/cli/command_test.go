@@ -138,7 +138,7 @@ func TestCommandRunWritesCustomerListOutput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			service := &stubCustomerListService{result: baseResult}
+			service := &stubCustomerWriteService{stubCustomerListService: stubCustomerListService{result: baseResult}}
 			var out bytes.Buffer
 			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, service, false)
 
@@ -146,11 +146,11 @@ func TestCommandRunWritesCustomerListOutput(t *testing.T) {
 				t.Fatalf("Run() error = %v", err)
 			}
 
-			if !service.called {
+			if !service.stubCustomerListService.called {
 				t.Fatal("customer service was not called")
 			}
-			if service.query != tc.wantQuery {
-				t.Fatalf("Run() query = %+v, want %+v", service.query, tc.wantQuery)
+			if service.stubCustomerListService.query != tc.wantQuery {
+				t.Fatalf("Run() query = %+v, want %+v", service.stubCustomerListService.query, tc.wantQuery)
 			}
 
 			switch {
@@ -226,7 +226,7 @@ func TestCommandRunRejectsInvalidInput(t *testing.T) {
 		},
 		{
 			name:    "unknown customer subcommand",
-			args:    []string{"customer", "create"},
+			args:    []string{"customer", "foo"},
 			service: stubHealthService{},
 			wantErr: "unknown command",
 		},
@@ -238,8 +238,12 @@ func TestCommandRunRejectsInvalidInput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			cmd := NewCommand(tc.service, nil, false)
-			if tc.name == "missing customer service" || tc.name == "unknown customer subcommand" {
+			var customerService CustomerServiceProvider
+			if tc.name == "unknown customer subcommand" {
+				customerService = &stubCustomerWriteService{}
+			}
+			cmd := NewCommand(tc.service, customerService, false)
+			if tc.name == "missing customer service" {
 				cmd = NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, false)
 			}
 			err := cmd.Run(context.Background(), tc.args, &bytes.Buffer{})
@@ -249,6 +253,449 @@ func TestCommandRunRejectsInvalidInput(t *testing.T) {
 
 			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("Run() error = %q, want substring %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+// CustomerWriteServiceStub for testing CLI write operations
+type stubCustomerWriteService struct {
+	stubCustomerListService
+	createArg *app.CreateCustomerCommand
+	createRes app.CustomerDTO
+	createErr error
+	updateID  string
+	updateArg *app.PatchCustomerCommand
+	updateRes app.CustomerDTO
+	updateErr error
+	deleteID  string
+	deleteErr error
+}
+
+func (s *stubCustomerWriteService) Create(ctx context.Context, cmd app.CreateCustomerCommand) (app.CustomerDTO, error) {
+	_ = ctx
+	s.createArg = &cmd
+	return s.createRes, s.createErr
+}
+
+func (s *stubCustomerWriteService) Update(ctx context.Context, id string, cmd app.PatchCustomerCommand) (app.CustomerDTO, error) {
+	_ = ctx
+	s.updateID = id
+	s.updateArg = &cmd
+	return s.updateRes, s.updateErr
+}
+
+func (s *stubCustomerWriteService) Delete(ctx context.Context, id string) error {
+	_ = ctx
+	s.deleteID = id
+	return s.deleteErr
+}
+
+func TestCommandCustomerCreateWithJSON(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		service       *stubCustomerWriteService
+		args          []string
+		wantErr       bool
+		wantErrSubstr string
+		wantCreateArg *app.CreateCustomerCommand
+		wantContain   string
+	}{
+		{
+			name: "creates customer with valid JSON",
+			service: &stubCustomerWriteService{
+				createRes: app.CustomerDTO{
+					ID:        "cus_123",
+					Type:      "company",
+					LegalName: "Acme SRL",
+					Email:     "billing@acme.example",
+					Status:    "active",
+				},
+			},
+			args: []string{"customer", "create", "--json", `{"type":"company","legal_name":"Acme SRL","email":"billing@acme.example"}`},
+			wantCreateArg: &app.CreateCustomerCommand{
+				Type:      "company",
+				LegalName: "Acme SRL",
+				Email:     "billing@acme.example",
+			},
+			wantContain: "cus_123",
+		},
+		{
+			name:          "returns error for malformed JSON",
+			service:       &stubCustomerWriteService{},
+			args:          []string{"customer", "create", "--json", `{invalid json}`},
+			wantErr:       true,
+			wantErrSubstr: "json:",
+		},
+		{
+			name: "returns error for missing required field",
+			service: &stubCustomerWriteService{
+				createErr: errors.New("legal name is required"),
+			},
+			args:          []string{"customer", "create", "--json", `{"type":"company"}`},
+			wantErr:       true,
+			wantErrSubstr: "legal name is required",
+		},
+		{
+			name: "returns error for unauthenticated request",
+			service: &stubCustomerWriteService{
+				createErr: app.ErrCustomerCreateAccessDenied,
+			},
+			args:          []string{"customer", "create", "--json", `{"type":"company","legal_name":"Test"}`},
+			wantErr:       true,
+			wantErrSubstr: "authenticated",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var out bytes.Buffer
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, tc.service, false)
+			err := cmd.Run(context.Background(), tc.args, &out)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("Run() error = nil, want non-nil")
+				}
+				if tc.wantErrSubstr != "" && !strings.Contains(err.Error(), tc.wantErrSubstr) {
+					t.Fatalf("Run() error = %q, want substring %q", err.Error(), tc.wantErrSubstr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+
+			if tc.wantCreateArg != nil {
+				if tc.service.createArg == nil {
+					t.Fatal("Create() was not called")
+				}
+				if tc.service.createArg.Type != tc.wantCreateArg.Type {
+					t.Errorf("Create() type = %q, want %q", tc.service.createArg.Type, tc.wantCreateArg.Type)
+				}
+				if tc.service.createArg.LegalName != tc.wantCreateArg.LegalName {
+					t.Errorf("Create() legal_name = %q, want %q", tc.service.createArg.LegalName, tc.wantCreateArg.LegalName)
+				}
+			}
+
+			if tc.wantContain != "" && !strings.Contains(out.String(), tc.wantContain) {
+				t.Errorf("Run() output = %q, want contains %q", out.String(), tc.wantContain)
+			}
+		})
+	}
+}
+
+func TestCommandCustomerCreateWithFormatFlag(t *testing.T) {
+	t.Parallel()
+
+	service := &stubCustomerWriteService{
+		createRes: app.CustomerDTO{
+			ID:        "cus_123",
+			Type:      "company",
+			LegalName: "Acme SRL",
+		},
+	}
+
+	tests := []struct {
+		name        string
+		args        []string
+		wantContain string
+	}{
+		{
+			name:        "text format default",
+			args:        []string{"customer", "create", "--json", `{"type":"company","legal_name":"Acme"}`},
+			wantContain: "cus_123",
+		},
+		{
+			name:        "json format",
+			args:        []string{"customer", "create", "--json", `{"type":"company","legal_name":"Acme"}`, "--format", "json"},
+			wantContain: `"id":"cus_123"`,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var out bytes.Buffer
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, service, false)
+			if err := cmd.Run(context.Background(), tc.args, &out); err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+
+			if !strings.Contains(out.String(), tc.wantContain) {
+				t.Fatalf("Run() output = %q, want contains %q", out.String(), tc.wantContain)
+			}
+		})
+	}
+}
+
+func TestCommandCustomerUpdateWithJSON(t *testing.T) {
+	t.Parallel()
+
+	email := "updated@example.com"
+	notes := ""
+
+	tests := []struct {
+		name          string
+		service       *stubCustomerWriteService
+		args          []string
+		wantErr       bool
+		wantErrSubstr string
+		wantUpdateID  string
+		wantUpdateArg *app.PatchCustomerCommand
+		wantContain   string
+	}{
+		{
+			name: "updates customer with partial patch leaving other fields untouched",
+			service: &stubCustomerWriteService{
+				updateRes: app.CustomerDTO{
+					ID:              "cus_123",
+					Type:            "company",
+					LegalName:       "Acme SRL",
+					Email:           "updated@example.com",
+					Notes:           "Old notes remain untouched",
+					DefaultCurrency: "USD",
+					Status:          "active",
+				},
+			},
+			args:         []string{"customer", "update", "--id", "cus_123", "--json", `{"email":"updated@example.com"}`},
+			wantUpdateID: "cus_123",
+			wantUpdateArg: &app.PatchCustomerCommand{
+				Email: &email,
+			},
+			wantContain: "cus_123",
+		},
+		{
+			name: "patch with one field leaves other pointer fields nil",
+			service: &stubCustomerWriteService{
+				updateRes: app.CustomerDTO{
+					ID:        "cus_123",
+					Type:      "company",
+					LegalName: "Acme SRL",
+					Email:     "updated@example.com",
+					Notes:     "Preserved notes",
+					Status:    "active",
+				},
+			},
+			args:         []string{"customer", "update", "--id", "cus_123", "--json", `{"email":"updated@example.com"}`},
+			wantUpdateID: "cus_123",
+			// Critical: only Email should be set, all other pointer fields should remain nil
+			// to preserve PATCH semantics where omitted fields remain untouched
+			wantUpdateArg: &app.PatchCustomerCommand{
+				Email:           &email,
+				Type:            nil,
+				LegalName:       nil,
+				TradeName:       nil,
+				TaxID:           nil,
+				Phone:           nil,
+				Website:         nil,
+				Notes:           nil, // This is what proves the "untouched" semantics
+				DefaultCurrency: nil,
+			},
+			wantContain: "cus_123",
+		},
+		{
+			name: "updates customer and clears notes field",
+			service: &stubCustomerWriteService{
+				updateRes: app.CustomerDTO{
+					ID:              "cus_123",
+					Type:            "company",
+					LegalName:       "Acme SRL",
+					Email:           "old@example.com",
+					Notes:           "",
+					DefaultCurrency: "USD",
+					Status:          "active",
+				},
+			},
+			args:         []string{"customer", "update", "--id", "cus_123", "--json", `{"notes":""}`},
+			wantUpdateID: "cus_123",
+			wantUpdateArg: &app.PatchCustomerCommand{
+				Notes: &notes,
+			},
+			wantContain: "cus_123",
+		},
+		{
+			name:          "returns error for malformed JSON",
+			service:       &stubCustomerWriteService{},
+			args:          []string{"customer", "update", "--id", "cus_123", "--json", `{invalid json}`},
+			wantErr:       true,
+			wantErrSubstr: "json:",
+		},
+		{
+			name:          "returns error for missing id",
+			service:       &stubCustomerWriteService{},
+			args:          []string{"customer", "update", "--json", `{}`},
+			wantErr:       true,
+			wantErrSubstr: "id",
+		},
+		{
+			name:          "returns error for not found",
+			service:       &stubCustomerWriteService{updateErr: app.ErrCustomerNotFound},
+			args:          []string{"customer", "update", "--id", "cus_nonexistent", "--json", `{}`},
+			wantErr:       true,
+			wantErrSubstr: "not found",
+		},
+		{
+			name:          "returns error for unauthenticated request",
+			service:       &stubCustomerWriteService{updateErr: app.ErrCustomerUpdateAccessDenied},
+			args:          []string{"customer", "update", "--id", "cus_123", "--json", `{}`},
+			wantErr:       true,
+			wantErrSubstr: "authenticated",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var out bytes.Buffer
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, tc.service, false)
+			err := cmd.Run(context.Background(), tc.args, &out)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("Run() error = nil, want non-nil")
+				}
+				if tc.wantErrSubstr != "" && !strings.Contains(err.Error(), tc.wantErrSubstr) {
+					t.Fatalf("Run() error = %q, want substring %q", err.Error(), tc.wantErrSubstr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+
+			if tc.wantUpdateID != "" && tc.service.updateID != tc.wantUpdateID {
+				t.Errorf("Update() id = %q, want %q", tc.service.updateID, tc.wantUpdateID)
+			}
+
+			if tc.wantUpdateArg != nil && tc.service.updateArg != nil {
+				// Verify specified fields match
+				if tc.wantUpdateArg.Email != nil {
+					if tc.service.updateArg.Email == nil || *tc.service.updateArg.Email != *tc.wantUpdateArg.Email {
+						t.Errorf("Update() email = %v, want %v", tc.service.updateArg.Email, tc.wantUpdateArg.Email)
+					}
+				}
+				if tc.wantUpdateArg.Notes != nil {
+					if tc.service.updateArg.Notes == nil || *tc.service.updateArg.Notes != *tc.wantUpdateArg.Notes {
+						t.Errorf("Update() notes = %v, want %v", tc.service.updateArg.Notes, tc.wantUpdateArg.Notes)
+					}
+				}
+				// Verify unspecified fields are nil (PATCH semantics: omitted fields remain untouched)
+				if tc.wantUpdateArg.Type == nil && tc.service.updateArg.Type != nil {
+					t.Errorf("Update() Type should be nil for PATCH, got %v", *tc.service.updateArg.Type)
+				}
+				if tc.wantUpdateArg.LegalName == nil && tc.service.updateArg.LegalName != nil {
+					t.Errorf("Update() LegalName should be nil for PATCH, got %v", *tc.service.updateArg.LegalName)
+				}
+				if tc.wantUpdateArg.TradeName == nil && tc.service.updateArg.TradeName != nil {
+					t.Errorf("Update() TradeName should be nil for PATCH, got %v", *tc.service.updateArg.TradeName)
+				}
+				if tc.wantUpdateArg.TaxID == nil && tc.service.updateArg.TaxID != nil {
+					t.Errorf("Update() TaxID should be nil for PATCH, got %v", *tc.service.updateArg.TaxID)
+				}
+				if tc.wantUpdateArg.Phone == nil && tc.service.updateArg.Phone != nil {
+					t.Errorf("Update() Phone should be nil for PATCH, got %v", *tc.service.updateArg.Phone)
+				}
+				if tc.wantUpdateArg.Website == nil && tc.service.updateArg.Website != nil {
+					t.Errorf("Update() Website should be nil for PATCH, got %v", *tc.service.updateArg.Website)
+				}
+				if tc.wantUpdateArg.Notes == nil && tc.service.updateArg.Notes != nil {
+					t.Errorf("Update() Notes should be nil for PATCH, got %v", *tc.service.updateArg.Notes)
+				}
+				if tc.wantUpdateArg.DefaultCurrency == nil && tc.service.updateArg.DefaultCurrency != nil {
+					t.Errorf("Update() DefaultCurrency should be nil for PATCH, got %v", *tc.service.updateArg.DefaultCurrency)
+				}
+			}
+
+			if tc.wantContain != "" && !strings.Contains(out.String(), tc.wantContain) {
+				t.Errorf("Run() output = %q, want contains %q", out.String(), tc.wantContain)
+			}
+		})
+	}
+}
+
+func TestCommandCustomerDelete(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		service       *stubCustomerWriteService
+		args          []string
+		wantErr       bool
+		wantErrSubstr string
+		wantDeleteID  string
+		wantContain   string
+	}{
+		{
+			name:         "deletes customer successfully",
+			service:      &stubCustomerWriteService{},
+			args:         []string{"customer", "delete", "--id", "cus_123"},
+			wantDeleteID: "cus_123",
+			wantContain:  "Deleted",
+		},
+		{
+			name:          "returns error for missing id",
+			service:       &stubCustomerWriteService{},
+			args:          []string{"customer", "delete"},
+			wantErr:       true,
+			wantErrSubstr: "id",
+		},
+		{
+			name:          "returns error for not found",
+			service:       &stubCustomerWriteService{deleteErr: app.ErrCustomerNotFound},
+			args:          []string{"customer", "delete", "--id", "cus_nonexistent"},
+			wantErr:       true,
+			wantErrSubstr: "not found",
+		},
+		{
+			name:          "returns error for unauthenticated request",
+			service:       &stubCustomerWriteService{deleteErr: app.ErrCustomerDeleteAccessDenied},
+			args:          []string{"customer", "delete", "--id", "cus_123"},
+			wantErr:       true,
+			wantErrSubstr: "authenticated",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var out bytes.Buffer
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, tc.service, false)
+			err := cmd.Run(context.Background(), tc.args, &out)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("Run() error = nil, want non-nil")
+				}
+				if tc.wantErrSubstr != "" && !strings.Contains(err.Error(), tc.wantErrSubstr) {
+					t.Fatalf("Run() error = %q, want substring %q", err.Error(), tc.wantErrSubstr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+
+			if tc.wantDeleteID != "" && tc.service.deleteID != tc.wantDeleteID {
+				t.Errorf("Delete() id = %q, want %q", tc.service.deleteID, tc.wantDeleteID)
+			}
+
+			if tc.wantContain != "" && !strings.Contains(out.String(), tc.wantContain) {
+				t.Errorf("Run() output = %q, want contains %q", out.String(), tc.wantContain)
 			}
 		})
 	}

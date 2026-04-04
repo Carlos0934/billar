@@ -67,7 +67,7 @@ func TestMCPServerOverStdio(t *testing.T) {
 	for _, tool := range toolsResult.Tools {
 		gotToolNames = append(gotToolNames, tool.Name)
 	}
-	wantToolNames := []string{"customer.list", "session.status"}
+	wantToolNames := []string{"customer.create", "customer.delete", "customer.list", "customer.update", "session.status"}
 	if !reflect.DeepEqual(gotToolNames, wantToolNames) {
 		t.Fatalf("ListTools() names = %v, want %v", gotToolNames, wantToolNames)
 	}
