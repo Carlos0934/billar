@@ -7,10 +7,6 @@ import (
 	"github.com/Carlos0934/billar/internal/app"
 )
 
-func loginIntentText(dto app.LoginIntentDTO) string {
-	return fmt.Sprintf("Login URL: %s\n", dto.LoginURL)
-}
-
 func sessionStatusText(dto app.SessionStatusDTO) string {
 	if strings.EqualFold(strings.TrimSpace(dto.Status), "unauthenticated") && dto.Email == "" && !dto.EmailVerified && dto.Subject == "" && dto.Issuer == "" {
 		return "Status: unauthenticated\n"
@@ -32,14 +28,6 @@ func sessionStatusText(dto app.SessionStatusDTO) string {
 	}
 
 	return builder.String()
-}
-
-func logoutText(dto app.LogoutDTO) string {
-	message := strings.TrimSpace(dto.Message)
-	if message == "" {
-		message = "Logged out"
-	}
-	return message + "\n"
 }
 
 func customerListText(result app.ListResult[app.CustomerDTO]) string {

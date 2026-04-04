@@ -1,9 +1,12 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Carlos0934/billar/internal/app"
@@ -11,20 +14,13 @@ import (
 )
 
 type sessionServiceStub struct {
-	startLoginCalled bool
-	statusCalled     bool
-	logoutCalled     bool
-	startLoginDTO    app.LoginIntentDTO
-	statusDTO        app.SessionStatusDTO
-	logoutDTO        app.LogoutDTO
-	startLoginErr    error
-	statusErr        error
-	logoutErr        error
+	statusCalled bool
+	statusDTO    app.SessionStatusDTO
+	statusErr    error
 }
 
-func (s *sessionServiceStub) StartLogin(context.Context) (app.LoginIntentDTO, error) {
-	s.startLoginCalled = true
-	return s.startLoginDTO, s.startLoginErr
+func (*sessionServiceStub) StartLogin(context.Context) (app.LoginIntentDTO, error) {
+	return app.LoginIntentDTO{}, nil
 }
 
 func (s *sessionServiceStub) Status(context.Context) (app.SessionStatusDTO, error) {
@@ -32,16 +28,14 @@ func (s *sessionServiceStub) Status(context.Context) (app.SessionStatusDTO, erro
 	return s.statusDTO, s.statusErr
 }
 
-func (s *sessionServiceStub) Logout(context.Context) (app.LogoutDTO, error) {
-	s.logoutCalled = true
-	return s.logoutDTO, s.logoutErr
+func (*sessionServiceStub) Logout(context.Context) (app.LogoutDTO, error) {
+	return app.LogoutDTO{}, nil
 }
 
 func TestSessionToolHandlers(t *testing.T) {
 	t.Parallel()
 
 	service := &sessionServiceStub{
-		startLoginDTO: app.LoginIntentDTO{LoginURL: "https://login.example"},
 		statusDTO: app.SessionStatusDTO{
 			Status:        "active",
 			Email:         "user@example.com",
@@ -49,7 +43,6 @@ func TestSessionToolHandlers(t *testing.T) {
 			Subject:       "subject-123",
 			Issuer:        "https://issuer.example",
 		},
-		logoutDTO: app.LogoutDTO{Message: "Logged out"},
 	}
 	guard := NewIngressGuard([]string{"127.0.0.1"})
 
@@ -61,22 +54,8 @@ func TestSessionToolHandlers(t *testing.T) {
 		check   func(*testing.T)
 	}{
 		{
-			name:    "start login",
-			handler: startLoginTool(service),
-			request: mcp.CallToolRequest{Header: headerWithValues(map[string]string{
-				"X-Forwarded-For":       "192.0.2.10",
-				"X-Authenticated-Email": "blocked@other.com",
-			})},
-			want: "Login URL: https://login.example\n",
-			check: func(t *testing.T) {
-				if !service.startLoginCalled {
-					t.Fatal("StartLogin() was not called")
-				}
-			},
-		},
-		{
 			name:    "status",
-			handler: statusTool(service, guard),
+			handler: statusTool(service, guard, nil),
 			request: mcp.CallToolRequest{Header: headerWithValues(map[string]string{
 				"X-Forwarded-For":       "127.0.0.1",
 				"X-Authenticated-Email": "user@example.com",
@@ -85,20 +64,6 @@ func TestSessionToolHandlers(t *testing.T) {
 			check: func(t *testing.T) {
 				if !service.statusCalled {
 					t.Fatal("Status() was not called")
-				}
-			},
-		},
-		{
-			name:    "logout",
-			handler: logoutTool(service, guard),
-			request: mcp.CallToolRequest{Header: headerWithValues(map[string]string{
-				"X-Real-IP":             "127.0.0.1",
-				"X-Authenticated-Email": "user@example.com",
-			})},
-			want: "Logged out\n",
-			check: func(t *testing.T) {
-				if !service.logoutCalled {
-					t.Fatal("Logout() was not called")
 				}
 			},
 		},
@@ -136,21 +101,11 @@ func TestSessionToolHandlersRejectIngress(t *testing.T) {
 	}{
 		{
 			name:    "status rejects disallowed ingress ip",
-			handler: statusTool(service, guard),
+			handler: statusTool(service, guard, nil),
 			request: mcp.CallToolRequest{Header: headerWithValues(map[string]string{"X-Forwarded-For": "192.0.2.10", "X-Authenticated-Email": "blocked@other.com"})},
 			check: func(t *testing.T) {
 				if service.statusCalled {
 					t.Fatal("Status() was called for a rejected request")
-				}
-			},
-		},
-		{
-			name:    "logout rejects disallowed ingress ip",
-			handler: logoutTool(service, guard),
-			request: mcp.CallToolRequest{Header: headerWithValues(map[string]string{"X-Forwarded-For": "192.0.2.10"})},
-			check: func(t *testing.T) {
-				if service.logoutCalled {
-					t.Fatal("Logout() was called for a rejected request")
 				}
 			},
 		},
@@ -178,7 +133,7 @@ func TestSessionToolHandlersPermitNoAllowlist(t *testing.T) {
 		statusDTO: app.SessionStatusDTO{Status: "unauthenticated"},
 	}
 
-	result, err := statusTool(service, NewIngressGuard(nil))(context.Background(), mcp.CallToolRequest{})
+	result, err := statusTool(service, NewIngressGuard(nil), nil)(context.Background(), mcp.CallToolRequest{})
 	if err != nil {
 		t.Fatalf("handler error = %v", err)
 	}
@@ -197,11 +152,11 @@ func TestSessionToolHandlersPermitAllowedIngressIP(t *testing.T) {
 	t.Parallel()
 
 	service := &sessionServiceStub{
-		logoutDTO: app.LogoutDTO{Message: "Logged out"},
+		statusDTO: app.SessionStatusDTO{Status: "active", Email: "person@example.com", EmailVerified: true},
 	}
 	guard := NewIngressGuard([]string{"127.0.0.1"})
 
-	result, err := logoutTool(service, guard)(context.Background(), mcp.CallToolRequest{Header: headerWithValues(map[string]string{
+	result, err := statusTool(service, guard, nil)(context.Background(), mcp.CallToolRequest{Header: headerWithValues(map[string]string{
 		"X-Forwarded-For":       "127.0.0.1",
 		"X-Authenticated-Email": "person@example.com",
 	})})
@@ -211,24 +166,56 @@ func TestSessionToolHandlersPermitAllowedIngressIP(t *testing.T) {
 	if result == nil || result.IsError {
 		t.Fatalf("handler result = %+v, want success result", result)
 	}
-	if got := mcp.GetTextFromContent(result.Content[0]); got != "Logged out\n" {
-		t.Fatalf("handler text = %q, want %q", got, "Logged out\n")
+	if got := mcp.GetTextFromContent(result.Content[0]); got != "Status: active\nEmail: person@example.com\nEmail verified: true\n" {
+		t.Fatalf("handler text = %q, want %q", got, "Status: active\nEmail: person@example.com\nEmail verified: true\n")
 	}
-	if !service.logoutCalled {
-		t.Fatal("Logout() was not called")
+	if !service.statusCalled {
+		t.Fatal("Status() was not called")
 	}
 }
 
 func TestSessionToolHandlersReturnToolErrors(t *testing.T) {
 	t.Parallel()
 
-	service := &sessionServiceStub{startLoginErr: errors.New("boom")}
-	result, err := startLoginTool(service)(context.Background(), mcp.CallToolRequest{})
+	service := &sessionServiceStub{statusErr: errors.New("boom")}
+	result, err := statusTool(service, NewIngressGuard(nil), nil)(context.Background(), mcp.CallToolRequest{})
 	if err != nil {
 		t.Fatalf("handler error = %v", err)
 	}
 	if result == nil || !result.IsError {
 		t.Fatalf("handler result = %+v, want error tool result", result)
+	}
+}
+
+func TestSessionToolHandlersLogSafeFieldsOnDeniedIngress(t *testing.T) {
+	t.Parallel()
+
+	service := &sessionServiceStub{}
+	guard := NewIngressGuard([]string{"127.0.0.1"})
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	result, err := statusTool(service, guard, logger)(context.Background(), mcp.CallToolRequest{Header: headerWithValues(map[string]string{
+		"X-Forwarded-For":       "192.0.2.10",
+		"X-Authenticated-Email": "blocked@example.com",
+	})})
+	if err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+	if result == nil || !result.IsError {
+		t.Fatalf("handler result = %+v, want error result", result)
+	}
+
+	logged := logBuf.String()
+	for _, want := range []string{"operation=session.status", "connector=mcp", "outcome=denied", "reason=ip_not_allowed"} {
+		if !strings.Contains(logged, want) {
+			t.Fatalf("log output = %q, want substring %q", logged, want)
+		}
+	}
+	for _, unwanted := range []string{"blocked@example.com", "192.0.2.10"} {
+		if strings.Contains(logged, unwanted) {
+			t.Fatalf("log output = %q, should not contain %q", logged, unwanted)
+		}
 	}
 }
 

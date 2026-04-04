@@ -71,7 +71,7 @@ func TestSessionStatusHandler(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(tc.method, "http://example.test/auth/session", nil)
 
-			SessionStatusHandler(useCase).ServeHTTP(rec, req)
+			SessionStatusHandler(useCase, nil).ServeHTTP(rec, req)
 
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d", rec.Code, tc.wantStatus)
@@ -128,7 +128,7 @@ func TestLogoutHandler(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(tc.method, "http://example.test/auth/logout", nil)
 
-			LogoutHandler(useCase).ServeHTTP(rec, req)
+			LogoutHandler(useCase, nil).ServeHTTP(rec, req)
 
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d", rec.Code, tc.wantStatus)

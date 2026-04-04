@@ -2,103 +2,65 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/Carlos0934/billar/internal/app"
+	"github.com/Carlos0934/billar/internal/infra/logging"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 )
 
-func registerTools(server *mcpsrv.MCPServer, service app.SessionService, customer CustomerListProvider, guard IngressGuard) []string {
-	registered := make([]string, 0, 4)
+func registerTools(server *mcpsrv.MCPServer, service app.SessionService, customer CustomerListProvider, guard IngressGuard, logger *slog.Logger) []string {
+	registered := make([]string, 0, 2)
 
-	loginTool, loginHandler := sessionStartLoginTool(service)
-	server.AddTool(loginTool, loginHandler)
-	registered = append(registered, loginTool.Name)
-
-	statusTool, statusHandler := sessionStatusTool(service, guard)
+	statusTool, statusHandler := sessionStatusTool(service, guard, logger)
 	server.AddTool(statusTool, statusHandler)
 	registered = append(registered, statusTool.Name)
 
-	logoutTool, logoutHandler := sessionLogoutTool(service, guard)
-	server.AddTool(logoutTool, logoutHandler)
-	registered = append(registered, logoutTool.Name)
-
-	registered = append(registered, registerCustomerTools(server, customer, guard)...)
+	registered = append(registered, registerCustomerTools(server, customer, guard, logger)...)
 
 	return registered
 }
 
-func startLoginTool(service app.SessionService) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	_, handler := sessionStartLoginTool(service)
+func statusTool(service app.SessionService, guard IngressGuard, logger *slog.Logger) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	_, handler := sessionStatusTool(service, guard, logger)
 	return handler
 }
 
-func statusTool(service app.SessionService, guard IngressGuard) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	_, handler := sessionStatusTool(service, guard)
-	return handler
-}
-
-func logoutTool(service app.SessionService, guard IngressGuard) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	_, handler := sessionLogoutTool(service, guard)
-	return handler
-}
-
-func sessionStartLoginTool(service app.SessionService) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
-	tool := mcp.NewTool("session.start_login", mcp.WithDescription("Start the login flow and return the login URL"))
-	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		_ = req
-		if service == nil {
-			return mcp.NewToolResultError("session service is required"), nil
-		}
-
-		result, err := service.StartLogin(ctx)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-
-		return mcp.NewToolResultText(loginIntentText(result)), nil
-	}
-}
-
-func sessionStatusTool(service app.SessionService, guard IngressGuard) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func sessionStatusTool(service app.SessionService, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("session.status", mcp.WithDescription("Return the current session status and identity details"))
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		_ = req
 		if service == nil {
+			logging.Event(ctx, logger, slog.LevelError, "session.status", "mcp", "error", slog.String("reason", "missing_session_service"))
 			return mcp.NewToolResultError("session service is required"), nil
 		}
 		if err := guard.authorize(req.Header); err != nil {
+			logging.Event(ctx, logger, slog.LevelWarn, "session.status", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		result, err := service.Status(ctx)
 		if err != nil {
+			logging.Event(ctx, logger, slog.LevelError, "session.status", "mcp", "error", slog.String("reason", classifyMCPAuthReason(err)))
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		logging.Event(ctx, logger, slog.LevelInfo, "session.status", "mcp", "success", slog.String("status", result.Status))
 
 		return mcp.NewToolResultText(sessionStatusText(result)), nil
 	}
 }
 
-func sessionLogoutTool(service app.SessionService, guard IngressGuard) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
-	tool := mcp.NewTool("session.logout", mcp.WithDescription("Terminate the current session"))
-	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		_ = req
-		if service == nil {
-			return mcp.NewToolResultError("session service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-
-		result, err := service.Logout(ctx)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-
-		return mcp.NewToolResultText(logoutText(result)), nil
+func classifyMCPAuthReason(err error) string {
+	if err == nil {
+		return ""
 	}
+	if errors.Is(err, ErrIPNotAllowed) {
+		return "ip_not_allowed"
+	}
+	return "internal_error"
 }
 
 func formatToolRegistrationError(toolName string, err error) error {

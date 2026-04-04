@@ -1,10 +1,13 @@
 package mcphttp
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Carlos0934/billar/internal/app"
@@ -115,7 +118,7 @@ func TestCallbackHandler(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(tc.method, "http://example.test/auth/callback?"+tc.query, nil)
 
-			CallbackHandler(useCase, stateStore).ServeHTTP(rec, req)
+			CallbackHandler(useCase, stateStore, nil).ServeHTTP(rec, req)
 
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d", rec.Code, tc.wantStatus)
@@ -152,5 +155,33 @@ func TestCallbackHandler(t *testing.T) {
 				t.Fatalf("command state = %q, want %q", useCase.cmd.State, tc.wantState)
 			}
 		})
+	}
+}
+
+func TestCallbackHandlerLogsSafeFields(t *testing.T) {
+	t.Parallel()
+
+	useCase := &callbackUseCaseStub{}
+	stateStore := &stateStoreStub{validateErr: errors.New("state invalid")}
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/auth/callback?code=code-123&state=state-123&email=user@example.com", nil)
+
+	CallbackHandler(useCase, stateStore, logger).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	logged := logBuf.String()
+	for _, want := range []string{"operation=auth.callback", "connector=mcp-http", "outcome=denied", "reason=invalid_state"} {
+		if !strings.Contains(logged, want) {
+			t.Fatalf("log output = %q, want substring %q", logged, want)
+		}
+	}
+	for _, unwanted := range []string{"code-123", "state-123", "user@example.com"} {
+		if strings.Contains(logged, unwanted) {
+			t.Fatalf("log output = %q, should not contain %q", logged, unwanted)
+		}
 	}
 }

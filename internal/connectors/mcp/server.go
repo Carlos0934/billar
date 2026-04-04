@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 
 	"github.com/Carlos0934/billar/internal/app"
@@ -18,7 +19,7 @@ type CustomerListProvider interface {
 	List(ctx context.Context, query app.ListQuery) (app.ListResult[app.CustomerDTO], error)
 }
 
-func NewServer(sessionService app.SessionService, customerService CustomerListProvider, guard IngressGuard) *Server {
+func NewServer(sessionService app.SessionService, customerService CustomerListProvider, guard IngressGuard, logger *slog.Logger) *Server {
 	mcpServer := mcpsrv.NewMCPServer(
 		"Billar MCP Session Surface",
 		"1.0.0",
@@ -26,7 +27,7 @@ func NewServer(sessionService app.SessionService, customerService CustomerListPr
 		mcpsrv.WithRecovery(),
 	)
 
-	toolNames := registerTools(mcpServer, sessionService, customerService, guard)
+	toolNames := registerTools(mcpServer, sessionService, customerService, guard, logger)
 
 	return &Server{
 		server:    mcpServer,

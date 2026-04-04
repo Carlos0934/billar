@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,11 +15,13 @@ import (
 	mcphttpconnector "github.com/Carlos0934/billar/internal/connectors/mcphttp"
 	infraauth "github.com/Carlos0934/billar/internal/infra/auth"
 	"github.com/Carlos0934/billar/internal/infra/config"
+	"github.com/Carlos0934/billar/internal/infra/logging"
 	infrasqlite "github.com/Carlos0934/billar/internal/infra/sqlite"
 )
 
 func main() {
 	ctx := context.Background()
+	logger := logging.New()
 	authCfg, err := config.LoadAuthConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -55,7 +57,7 @@ func main() {
 	}()
 	customerService := app.NewCustomerService(sessionStore, infrasqlite.NewCustomerStore(customerStore))
 	healthService := app.NewHealthService(appCfg.AppName)
-	mcpServer := mcpconnector.NewServer(sessionService, customerService, mcpconnector.NewIngressGuardFromConfig(appCfg.AccessPolicy))
+	mcpServer := mcpconnector.NewServer(sessionService, customerService, mcpconnector.NewIngressGuardFromConfig(appCfg.AccessPolicy), logger)
 
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", mcphttpconnector.HealthHandler(healthService))
@@ -64,10 +66,10 @@ func main() {
 		ResourceURI:          authCfg.ResourceServerURI,
 		AuthorizationServers: []string{authCfg.IssuerURL},
 	}))
-	mux.Handle("/auth/login/start", mcphttpconnector.LoginHandler(sessionService))
-	mux.Handle("/auth/callback", mcphttpconnector.CallbackHandler(sessionService, stateStore))
-	mux.Handle("/auth/session", mcphttpconnector.SessionStatusHandler(sessionService))
-	mux.Handle("/auth/logout", mcphttpconnector.LogoutHandler(sessionService))
+	mux.Handle("/auth/login/start", mcphttpconnector.LoginHandler(sessionService, logger))
+	mux.Handle("/auth/callback", mcphttpconnector.CallbackHandler(sessionService, stateStore, logger))
+	mux.Handle("/auth/session", mcphttpconnector.SessionStatusHandler(sessionService, logger))
+	mux.Handle("/auth/logout", mcphttpconnector.LogoutHandler(sessionService, logger))
 
 	server := &http.Server{
 		Addr:              authCfg.ListenAddr,
@@ -85,7 +87,7 @@ func main() {
 		_ = server.Shutdown(ctx)
 	}()
 
-	log.Printf("mcp-http server listening on http://%s", authCfg.ListenAddr)
+	logger.Info("server listening", slog.String("server", "mcp-http"), slog.String("addr", authCfg.ListenAddr))
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

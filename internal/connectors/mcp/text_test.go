@@ -6,16 +6,6 @@ import (
 	"github.com/Carlos0934/billar/internal/app"
 )
 
-func TestLoginIntentText(t *testing.T) {
-	t.Parallel()
-
-	got := loginIntentText(app.LoginIntentDTO{LoginURL: "https://login.example"})
-	want := "Login URL: https://login.example\n"
-	if got != want {
-		t.Fatalf("loginIntentText() = %q, want %q", got, want)
-	}
-}
-
 func TestSessionStatusText(t *testing.T) {
 	t.Parallel()
 
@@ -51,16 +41,6 @@ func TestSessionStatusText(t *testing.T) {
 				t.Fatalf("sessionStatusText() = %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestLogoutText(t *testing.T) {
-	t.Parallel()
-
-	got := logoutText(app.LogoutDTO{Message: "Logged out"})
-	want := "Logged out\n"
-	if got != want {
-		t.Fatalf("logoutText() = %q, want %q", got, want)
 	}
 }
 

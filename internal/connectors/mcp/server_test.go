@@ -11,13 +11,11 @@ func TestNewServerRegistersSessionTools(t *testing.T) {
 	t.Parallel()
 
 	service := &sessionServiceStub{
-		startLoginDTO: app.LoginIntentDTO{LoginURL: "https://login.example"},
-		statusDTO:     app.SessionStatusDTO{Status: "unauthenticated"},
-		logoutDTO:     app.LogoutDTO{Message: "Logged out"},
+		statusDTO: app.SessionStatusDTO{Status: "unauthenticated"},
 	}
 
-	server := NewServer(service, &customerListServiceStub{}, NewIngressGuard(nil))
-	want := []string{"session.start_login", "session.status", "session.logout", "customer.list"}
+	server := NewServer(service, &customerListServiceStub{}, NewIngressGuard(nil), nil)
+	want := []string{"session.status", "customer.list"}
 	if got := server.ToolNames(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("ToolNames() = %v, want %v", got, want)
 	}

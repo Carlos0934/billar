@@ -155,7 +155,8 @@ Includes:
 * create invoice draft
 * issue invoice
 * render invoice pdf
-* authenticate/logout session
+* inspect current session state
+* handle auth callback/runtime for development and testing
 * validate authenticated access
 
 ## 5.3 Connectors
@@ -699,8 +700,6 @@ invoice invoice pdf --id <id>
 
 ## 13. MCP Tool Surface
 
-* `session.start_login`
-* `session.logout`
 * `session.status`
 * `issuer.setup`
 * `issuer.get`
@@ -725,8 +724,10 @@ MCP and CLI both call application services.
 Neither should depend directly on SQLite, OAuth internals, or PDF libraries.
 OAuth callback handling is HTTP-only and does not belong in the MCP tool surface.
 The HTTP MCP transport is exposed from the auth HTTP server at `/v1/mcp`.
+Authentication for MCP-capable clients is owned by the client, not by Billar tools.
+The current MCP session surface keeps only `session.status` for session inspection.
+Stdio remains available as a technical development and testing transport, not as the real interactive authentication UX.
 Early MCP bootstrap may include deterministic connector-level tools such as `hello_world` while the application surface is still growing.
-`session.start_login` is public; `session.status` and `session.logout` are protected MCP operations.
 For MCP ingress, exact email allowlist or allowed domain remains required, and IP allowlisting is optional by config.
 
 ---
@@ -913,7 +914,7 @@ Development default for the first runnable auth surface: Google OIDC with a loop
 * OAuth/OIDC login required
 * allow exact email matches and allowed domains
 * MCP may additionally enforce optional ingress IP allowlists by config
-* manual logout available
+* MCP clients own their interactive auth flow; Billar exposes session inspection and preserves the HTTP callback/runtime for development and testing
 * single operator scope for now
 
 ### Invoice generation

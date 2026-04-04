@@ -67,7 +67,7 @@ func TestMCPServerOverStdio(t *testing.T) {
 	for _, tool := range toolsResult.Tools {
 		gotToolNames = append(gotToolNames, tool.Name)
 	}
-	wantToolNames := []string{"customer.list", "session.logout", "session.start_login", "session.status"}
+	wantToolNames := []string{"customer.list", "session.status"}
 	if !reflect.DeepEqual(gotToolNames, wantToolNames) {
 		t.Fatalf("ListTools() names = %v, want %v", gotToolNames, wantToolNames)
 	}
@@ -86,22 +86,6 @@ func TestMCPServerOverStdio(t *testing.T) {
 	}
 	if got := mcp.GetTextFromContent(customerResult.Content[0]); got != "Billar Customers\n───────────────\nPage: 1\nPage size: 20\nTotal: 0\nNo customers found\n" {
 		t.Fatalf("CallTool(customer.list) text = %q", got)
-	}
-
-	callResult, err := mcpClient.CallTool(ctx, mcp.CallToolRequest{
-		Params: mcp.CallToolParams{Name: "session.start_login"},
-	})
-	if err != nil {
-		t.Fatalf("CallTool() error = %v", err)
-	}
-	if callResult.IsError {
-		t.Fatalf("CallTool() returned tool error: %+v", callResult)
-	}
-	if len(callResult.Content) != 1 {
-		t.Fatalf("CallTool() content = %d items, want 1", len(callResult.Content))
-	}
-	if got := mcp.GetTextFromContent(callResult.Content[0]); got != "Login URL: https://login.example/test-provider\n" {
-		t.Fatalf("CallTool() text = %q, want %q", got, "Login URL: https://login.example/test-provider\n")
 	}
 
 	statusResult, err := mcpClient.CallTool(ctx, mcp.CallToolRequest{

@@ -16,7 +16,7 @@ import (
 func TestMCPServerOverHTTP(t *testing.T) {
 	t.Parallel()
 
-	server := NewServer(noopHTTPTestSessionService{provider: "test-provider"}, &customerListServiceStub{result: app.ListResult[app.CustomerDTO]{
+	server := NewServer(noopHTTPTestSessionService{}, &customerListServiceStub{result: app.ListResult[app.CustomerDTO]{
 		Items: []app.CustomerDTO{{
 			ID:              "cus_123",
 			Type:            "company",
@@ -29,7 +29,7 @@ func TestMCPServerOverHTTP(t *testing.T) {
 		Total:    1,
 		Page:     1,
 		PageSize: 20,
-	}}, NewIngressGuard(nil))
+	}}, NewIngressGuard(nil), nil)
 	httpServer := httptest.NewServer(server.HTTPHandler())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -77,7 +77,7 @@ func TestMCPServerOverHTTP(t *testing.T) {
 	for _, tool := range toolsResult.Tools {
 		gotToolNames = append(gotToolNames, tool.Name)
 	}
-	wantToolNames := []string{"customer.list", "session.logout", "session.start_login", "session.status"}
+	wantToolNames := []string{"customer.list", "session.status"}
 	if !reflect.DeepEqual(gotToolNames, wantToolNames) {
 		t.Fatalf("ListTools() names = %v, want %v", gotToolNames, wantToolNames)
 	}
@@ -100,16 +100,10 @@ func TestMCPServerOverHTTP(t *testing.T) {
 }
 
 type noopHTTPTestSessionService struct {
-	provider string
 }
 
-func (s noopHTTPTestSessionService) StartLogin(context.Context) (app.LoginIntentDTO, error) {
-	provider := s.provider
-	if provider == "" {
-		provider = "openai"
-	}
-
-	return app.LoginIntentDTO{LoginURL: "https://login.example/" + provider}, nil
+func (noopHTTPTestSessionService) StartLogin(context.Context) (app.LoginIntentDTO, error) {
+	return app.LoginIntentDTO{}, nil
 }
 
 func (noopHTTPTestSessionService) Status(context.Context) (app.SessionStatusDTO, error) {

@@ -60,7 +60,7 @@ func TestLoginHandler(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(tc.method, "http://example.test/auth/login/start", nil)
 
-			LoginHandler(useCase).ServeHTTP(rec, req)
+			LoginHandler(useCase, nil).ServeHTTP(rec, req)
 
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d", rec.Code, tc.wantStatus)

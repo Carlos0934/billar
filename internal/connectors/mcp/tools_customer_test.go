@@ -46,7 +46,7 @@ func TestCustomerListToolHandlers(t *testing.T) {
 	}
 	guard := NewIngressGuard([]string{"127.0.0.1"})
 
-	_, handler := customerListTool(service, guard)
+	_, handler := customerListTool(service, guard, nil)
 	result, err := handler(context.Background(), mcp.CallToolRequest{Header: headerWithValues(map[string]string{
 		"X-Forwarded-For":       "127.0.0.1",
 		"X-Authenticated-Email": "user@example.com",
@@ -83,7 +83,7 @@ func TestCustomerListToolHandlersRejectIngress(t *testing.T) {
 	service := &customerListServiceStub{}
 	guard := NewIngressGuard([]string{"127.0.0.1"})
 
-	_, handler := customerListTool(service, guard)
+	_, handler := customerListTool(service, guard, nil)
 	result, err := handler(context.Background(), mcp.CallToolRequest{Header: headerWithValues(map[string]string{
 		"X-Forwarded-For":       "192.0.2.10",
 		"X-Authenticated-Email": "blocked@example.com",
@@ -103,7 +103,7 @@ func TestCustomerListToolHandlersRejectBadSort(t *testing.T) {
 	t.Parallel()
 
 	service := &customerListServiceStub{}
-	_, handler := customerListTool(service, NewIngressGuard(nil))
+	_, handler := customerListTool(service, NewIngressGuard(nil), nil)
 	result, err := handler(context.Background(), mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "customer.list", Arguments: map[string]any{
 		"sort": "foo:bar",
 	}}})

@@ -2,30 +2,33 @@ package mcp
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/Carlos0934/billar/internal/app"
+	"github.com/Carlos0934/billar/internal/infra/logging"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 )
 
-func registerCustomerTools(server *mcpsrv.MCPServer, service CustomerListProvider, guard IngressGuard) []string {
+func registerCustomerTools(server *mcpsrv.MCPServer, service CustomerListProvider, guard IngressGuard, logger *slog.Logger) []string {
 	registered := make([]string, 0, 1)
 
-	tool, handler := customerListTool(service, guard)
+	tool, handler := customerListTool(service, guard, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
 	return registered
 }
 
-func customerListTool(service CustomerListProvider, guard IngressGuard) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func customerListTool(service CustomerListProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("customer.list", mcp.WithDescription("Return a paginated list of customers"))
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("customer service is required"), nil
 		}
 		if err := guard.authorize(req.Header); err != nil {
+			logging.Event(ctx, logger, slog.LevelWarn, "customer.list", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 

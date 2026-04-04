@@ -31,7 +31,7 @@ func TestV1MCPRoute(t *testing.T) {
 		Total:    1,
 		Page:     1,
 		PageSize: 20,
-	}}, mcpconnector.NewIngressGuard(nil)).HTTPHandler())
+	}}, mcpconnector.NewIngressGuard(nil), nil).HTTPHandler())
 
 	httpServer := httptest.NewServer(mux)
 
