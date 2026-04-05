@@ -320,7 +320,13 @@ are cascaded to the linked legal entity when provided.`),
 }
 
 func customerProfileDeleteTool(service CustomerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
-	tool := mcp.NewTool("customer_profile.delete", mcp.WithDescription("Delete a customer profile"))
+	tool := mcp.NewTool("customer_profile.delete",
+		mcp.WithDescription("Delete a customer profile"),
+		mcp.WithString("id",
+			mcp.Required(),
+			mcp.Description("Customer profile ID to delete (e.g., 'cus_123')"),
+		),
+	)
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("customer profile service is required"), nil

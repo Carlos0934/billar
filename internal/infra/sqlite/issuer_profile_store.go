@@ -72,6 +72,28 @@ INSERT INTO issuer_profiles (
 	return nil
 }
 
+func (s *IssuerProfileStore) Delete(ctx context.Context, id string) error {
+	if s == nil || s.db == nil {
+		return errors.New("issuer profile sqlite store is required")
+	}
+
+	result, err := s.db.ExecContext(ctx, "DELETE FROM issuer_profiles WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("delete issuer profile: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return app.ErrIssuerProfileNotFound
+	}
+
+	return nil
+}
+
 func (s *IssuerProfileStore) GetByID(ctx context.Context, id string) (*core.IssuerProfile, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("issuer profile sqlite store is required")

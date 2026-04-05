@@ -13,7 +13,7 @@ import (
 )
 
 func registerIssuerProfileTools(server *mcpsrv.MCPServer, service IssuerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) []string {
-	registered := make([]string, 0, 3)
+	registered := make([]string, 0, 4)
 
 	tool, handler := issuerProfileCreateTool(service, guard, logger)
 	server.AddTool(tool, handler)
@@ -24,6 +24,10 @@ func registerIssuerProfileTools(server *mcpsrv.MCPServer, service IssuerProfileW
 	registered = append(registered, tool.Name)
 
 	tool, handler = issuerProfileUpdateTool(service, guard, logger)
+	server.AddTool(tool, handler)
+	registered = append(registered, tool.Name)
+
+	tool, handler = issuerProfileDeleteTool(service, guard, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
@@ -270,6 +274,36 @@ are cascaded to the linked legal entity when provided.`),
 		}
 
 		return mcp.NewToolResultText(issuerProfileUpdateText(result)), nil
+	}
+}
+
+func issuerProfileDeleteTool(service IssuerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+	tool := mcp.NewTool("issuer_profile.delete",
+		mcp.WithDescription("Delete an issuer profile"),
+		mcp.WithString("id",
+			mcp.Required(),
+			mcp.Description("Issuer profile ID to delete (e.g., 'iss_123')"),
+		),
+	)
+	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if service == nil {
+			return mcp.NewToolResultError("issuer profile service is required"), nil
+		}
+		if err := guard.authorize(req.Header); err != nil {
+			logging.Event(ctx, logger, slog.LevelWarn, "issuer_profile.delete", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		id := strings.TrimSpace(req.GetString("id", ""))
+		if id == "" {
+			return mcp.NewToolResultError("id argument is required"), nil
+		}
+
+		if err := service.Delete(ctx, id); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(fmt.Sprintf("Issuer profile deleted: %s", id)), nil
 	}
 }
 

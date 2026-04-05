@@ -30,6 +30,11 @@ func (s *issuerProfileStoreStub) GetByID(ctx context.Context, id string) (*core.
 	return s.getByIDRes, s.getByIDErr
 }
 
+func (s *issuerProfileStoreStub) Delete(ctx context.Context, id string) error {
+	_ = ctx
+	return nil
+}
+
 type legalEntityStoreStubForIssuer struct {
 	called     bool
 	query      ListQuery

@@ -216,6 +216,10 @@ func (s issuerProfileProviderStub) Update(ctx context.Context, id string, cmd ap
 	return app.IssuerProfileDTO{}, nil
 }
 
+func (s issuerProfileProviderStub) Delete(ctx context.Context, id string) error {
+	return nil
+}
+
 type customerProfileProviderStub struct{}
 
 func (s customerProfileProviderStub) List(ctx context.Context, query app.ListQuery) (app.ListResult[app.CustomerProfileDTO], error) {

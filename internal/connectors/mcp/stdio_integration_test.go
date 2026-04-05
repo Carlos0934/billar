@@ -74,6 +74,7 @@ func TestMCPServerOverStdio(t *testing.T) {
 		"customer_profile.list",
 		"customer_profile.update",
 		"issuer_profile.create",
+		"issuer_profile.delete",
 		"issuer_profile.get",
 		"issuer_profile.update",
 		"session.status",

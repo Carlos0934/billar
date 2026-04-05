@@ -13,7 +13,7 @@ import (
 )
 
 func registerTools(server *mcpsrv.MCPServer, sessionService app.SessionService, issuer IssuerProfileWriteProvider, customer CustomerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) []string {
-	registered := make([]string, 0, 9)
+	registered := make([]string, 0, 10)
 
 	statusTool, statusHandler := sessionStatusTool(sessionService, guard, logger)
 	server.AddTool(statusTool, statusHandler)

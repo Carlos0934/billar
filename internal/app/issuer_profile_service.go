@@ -13,6 +13,7 @@ var ErrIssuerProfileNotFound = errors.New("issuer profile not found")
 type IssuerProfileStore interface {
 	Save(ctx context.Context, profile *core.IssuerProfile) error
 	GetByID(ctx context.Context, id string) (*core.IssuerProfile, error)
+	Delete(ctx context.Context, id string) error
 }
 
 type IssuerProfileService struct {
@@ -117,4 +118,28 @@ func (s IssuerProfileService) Update(ctx context.Context, id string, cmd PatchIs
 	}
 
 	return issuerProfileToDTO(*profile), nil
+}
+
+func (s IssuerProfileService) Delete(ctx context.Context, id string) error {
+	if s.profiles == nil {
+		return errors.New("issuer profile store is required")
+	}
+
+	profile, err := s.profiles.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrIssuerProfileNotFound) {
+			return ErrIssuerProfileNotFound
+		}
+		return fmt.Errorf("get issuer profile: %w", err)
+	}
+
+	if err := profile.ValidateDelete(); err != nil {
+		return err
+	}
+
+	if err := s.profiles.Delete(ctx, id); err != nil {
+		return fmt.Errorf("delete issuer profile: %w", err)
+	}
+
+	return nil
 }

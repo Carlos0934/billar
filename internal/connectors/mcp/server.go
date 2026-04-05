@@ -19,6 +19,7 @@ type IssuerProfileWriteProvider interface {
 	Create(ctx context.Context, cmd app.CreateIssuerProfileCommand) (app.IssuerProfileDTO, error)
 	Get(ctx context.Context, id string) (app.IssuerProfileDTO, error)
 	Update(ctx context.Context, id string, cmd app.PatchIssuerProfileCommand) (app.IssuerProfileDTO, error)
+	Delete(ctx context.Context, id string) error
 }
 
 type CustomerProfileListProvider interface {

@@ -19,6 +19,8 @@ type issuerProfileServiceStub struct {
 	updateArg *app.PatchIssuerProfileCommand
 	updateRes app.IssuerProfileDTO
 	updateErr error
+	deleteID  string
+	deleteErr error
 }
 
 func (s *issuerProfileServiceStub) Create(ctx context.Context, cmd app.CreateIssuerProfileCommand) (app.IssuerProfileDTO, error) {
@@ -37,6 +39,12 @@ func (s *issuerProfileServiceStub) Update(ctx context.Context, id string, cmd ap
 	s.updateID = id
 	s.updateArg = &cmd
 	return s.updateRes, s.updateErr
+}
+
+func (s *issuerProfileServiceStub) Delete(ctx context.Context, id string) error {
+	_ = ctx
+	s.deleteID = id
+	return s.deleteErr
 }
 
 func TestIssuerProfileCreateToolHandlers(t *testing.T) {
@@ -135,6 +143,65 @@ func TestIssuerProfileCreateToolHandlers(t *testing.T) {
 	}
 }
 
+func TestIssuerProfileDeleteToolHandlers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		service       *issuerProfileServiceStub
+		arguments     map[string]any
+		wantErr       bool
+		wantErrSubstr string
+		wantDeleteID  string
+	}{
+		{
+			name:         "deletes issuer profile successfully",
+			service:      &issuerProfileServiceStub{},
+			arguments:    map[string]any{"id": "iss_123"},
+			wantDeleteID: "iss_123",
+		},
+		{
+			name:          "returns not-found error",
+			service:       &issuerProfileServiceStub{deleteErr: app.ErrIssuerProfileNotFound},
+			arguments:     map[string]any{"id": "iss_nonexistent"},
+			wantErr:       true,
+			wantErrSubstr: "not found",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, handler := issuerProfileDeleteTool(tc.service, NewIngressGuard(nil), nil)
+			result, err := handler(context.Background(), mcp.CallToolRequest{
+				Params: mcp.CallToolParams{Name: "issuer_profile.delete", Arguments: tc.arguments},
+			})
+			if err != nil {
+				t.Fatalf("handler error = %v", err)
+			}
+
+			if tc.wantErr {
+				if result == nil || !result.IsError {
+					t.Fatalf("handler result = %+v, want error result", result)
+				}
+				if tc.wantErrSubstr != "" && !strings.Contains(mcp.GetTextFromContent(result.Content[0]), tc.wantErrSubstr) {
+					t.Fatalf("handler error = %q, want substring %q", mcp.GetTextFromContent(result.Content[0]), tc.wantErrSubstr)
+				}
+				return
+			}
+
+			if result == nil || result.IsError {
+				t.Fatalf("handler result = %+v, want success result", result)
+			}
+
+			if tc.wantDeleteID != "" && tc.service.deleteID != tc.wantDeleteID {
+				t.Errorf("Delete() id = %q, want %q", tc.service.deleteID, tc.wantDeleteID)
+			}
+		})
+	}
+}
 func TestIssuerProfileUpdateToolHandlers_LEFields(t *testing.T) {
 	t.Parallel()
 
