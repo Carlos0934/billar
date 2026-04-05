@@ -25,16 +25,17 @@ func main() {
 		}
 	}()
 
-	identities, err := app.NewLocalBypassIdentitySource(os.Getenv("BILLAR_LOCAL_AUTH_EMAIL"), app.IdentityPolicy{
-		AllowedEmails:  cfg.AccessPolicy.AllowedEmails,
-		AllowedDomains: cfg.AccessPolicy.AllowedDomains,
-	})
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	legalEntityService := app.NewLegalEntityService(infrasqlite.NewLegalEntityStore(store))
+	issuerProfileService := app.NewIssuerProfileService(infrasqlite.NewLegalEntityStore(store), infrasqlite.NewIssuerProfileStore(store))
+	customerProfileService := app.NewCustomerProfileService(infrasqlite.NewLegalEntityStore(store), infrasqlite.NewCustomerProfileStore(store))
 
-	cmd := connectorcli.NewCommand(app.NewHealthService(cfg.AppName), app.NewCustomerService(identities, infrasqlite.NewCustomerStore(store)), cfg.ColorEnabled)
+	cmd := connectorcli.NewCommand(
+		app.NewHealthService(cfg.AppName),
+		legalEntityService,
+		issuerProfileService,
+		customerProfileService,
+		cfg.ColorEnabled,
+	)
 
 	if err := cmd.Run(ctx, os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)

@@ -50,6 +50,13 @@ func Open(path string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
+	// Enable foreign key constraints (SQLite disabled by default)
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		cleanup()
+		_ = db.Close()
+		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
+
 	store := &Store{db: db, cleanup: cleanup}
 	if err := store.bootstrap(); err != nil {
 		_ = store.Close()

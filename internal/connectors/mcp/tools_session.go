@@ -12,14 +12,16 @@ import (
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 )
 
-func registerTools(server *mcpsrv.MCPServer, service app.SessionService, customer CustomerServiceProvider, guard IngressGuard, logger *slog.Logger) []string {
-	registered := make([]string, 0, 2)
+func registerTools(server *mcpsrv.MCPServer, sessionService app.SessionService, legalEntity LegalEntityWriteProvider, issuer IssuerProfileWriteProvider, customer CustomerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) []string {
+	registered := make([]string, 0, 11)
 
-	statusTool, statusHandler := sessionStatusTool(service, guard, logger)
+	statusTool, statusHandler := sessionStatusTool(sessionService, guard, logger)
 	server.AddTool(statusTool, statusHandler)
 	registered = append(registered, statusTool.Name)
 
-	registered = append(registered, registerCustomerTools(server, customer, guard, logger)...)
+	registered = append(registered, registerLegalEntityTools(server, legalEntity, guard, logger)...)
+	registered = append(registered, registerIssuerProfileTools(server, issuer, guard, logger)...)
+	registered = append(registered, registerCustomerProfileTools(server, customer, guard, logger)...)
 
 	return registered
 }

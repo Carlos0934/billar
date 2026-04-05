@@ -4,8 +4,9 @@
 
 This system is a Go application for managing:
 
-* customers
-* customer-specific service agreements
+* legal entities shared by issuer and customer roles
+* customer profiles
+* customer-profile-specific service agreements
 * billable time entries
 * invoice generation
 * invoice PDF rendering
@@ -77,7 +78,7 @@ The main objective is to support a reliable hourly billing flow with a clean int
 ### Billing model
 
 * Hourly billing first
-* Customer can have one or more service agreements
+* Customer profile can have one or more service agreements
 * One service agreement has one hourly rate at a time
 * Invoice quantity is total billable hours
 
@@ -133,7 +134,8 @@ Contains the billing model and core rules.
 
 Includes:
 
-* customer
+* legal entity
+* customer profile
 * service agreement
 * time entry
 * invoice
@@ -149,7 +151,9 @@ Contains the operations the app exposes.
 
 Includes:
 
-* create customer
+* create legal entity
+* create customer profile
+* configure issuer profile
 * create agreement
 * record time entry
 * create invoice draft
@@ -188,9 +192,9 @@ Includes:
 
 The app only needs a few stable business objects.
 
-## 6.1 Customer
+## 6.1 LegalEntity
 
-Represents the billed party.
+Represents shared legal and contact data for a billable party.
 
 ### Fields
 
@@ -203,6 +207,24 @@ Represents the billed party.
 * `Phone`
 * `Website`
 * `BillingAddress`
+* `CreatedAt`
+* `UpdatedAt`
+
+### Rules
+
+* a legal entity must have a billing name
+* type must be one of `individual` or `company`
+
+---
+
+## 6.2 CustomerProfile
+
+Represents a customer role attached 1:1 to a legal entity.
+
+### Fields
+
+* `ID`
+* `LegalEntityID`
 * `Status`
 * `DefaultCurrency`
 * `Notes`
@@ -211,20 +233,21 @@ Represents the billed party.
 
 ### Rules
 
-* a customer must have a billing name
-* inactive customers should not receive new invoices
+* belongs to exactly one legal entity
+* one legal entity can have at most one customer profile
+* inactive customer profiles should not receive new invoices
 * default currency is USD unless explicitly set otherwise
 
 ---
 
-## 6.2 ServiceAgreement
+## 6.3 ServiceAgreement
 
-Represents a billable agreement for a customer.
+Represents a billable agreement for a customer profile.
 
 ### Fields
 
 * `ID`
-* `CustomerID`
+* `CustomerProfileID`
 * `Code`
 * `Name`
 * `Description`
@@ -239,7 +262,7 @@ Represents a billable agreement for a customer.
 
 ### Rules
 
-* belongs to exactly one customer
+* belongs to exactly one customer profile
 * initial version supports `hourly` only
 * hourly rate must be positive
 * agreement must be active to record billable time
@@ -247,14 +270,14 @@ Represents a billable agreement for a customer.
 
 ---
 
-## 6.3 TimeEntry
+## 6.4 TimeEntry
 
 Represents recorded work.
 
 ### Fields
 
 * `ID`
-* `CustomerID`
+* `CustomerProfileID`
 * `ServiceAgreementID`
 * `WorkDate`
 * `Hours`
@@ -274,7 +297,7 @@ Represents recorded work.
 
 ---
 
-## 6.4 Invoice
+## 6.5 Invoice
 
 Represents a financial document.
 
@@ -282,7 +305,7 @@ Represents a financial document.
 
 * `ID`
 * `InvoiceNumber`
-* `CustomerID`
+* `CustomerProfileID`
 * `IssueDate`
 * `DueDate`
 * `Currency`
@@ -319,28 +342,27 @@ Represents a financial document.
 
 ---
 
-## 6.5 IssuerProfile
+## 6.6 IssuerProfile
 
 Represents the operator/company issuing invoices.
 
 ### Fields
 
 * `ID`
-* `LegalName`
-* `TaxID`
-* `Email`
-* `Phone`
-* `Website`
-* `Address`
+* `LegalEntityID`
 * `DefaultCurrency`
-* `InvoicePrefix`
-* `PaymentInstructions`
+* `DefaultNotes`
 * `CreatedAt`
 * `UpdatedAt`
 
+### Rules
+
+* belongs to exactly one legal entity
+* one legal entity can have at most one issuer profile
+
 ---
 
-## 6.6 Session
+## 6.7 Session
 
 Represents current access state.
 
@@ -425,7 +447,7 @@ Example:
 * `InvoiceNumber`
 * `Address`
 * `DateRange`
-* `CustomerStatus`
+* `CustomerProfileStatus`
 * `InvoiceStatus`
 * `BillingMode`
 
@@ -440,31 +462,39 @@ Keep the app surface small and explicit.
 * `GetSessionStatus`
 * `ValidateAccess`
 
-## 8.2 Customer
+## 8.2 Legal Entity
 
-* `CreateCustomer`
-* `UpdateCustomer`
-* `GetCustomer`
-* `ListCustomers`
-* `DeactivateCustomer`
+* `CreateLegalEntity`
+* `UpdateLegalEntity`
+* `GetLegalEntity`
+* `ListLegalEntities`
+* `DeleteLegalEntity`
 
-## 8.3 Service Agreement
+## 8.3 Customer Profile
+
+* `CreateCustomerProfile`
+* `UpdateCustomerProfile`
+* `GetCustomerProfile`
+* `ListCustomerProfiles`
+* `DeleteCustomerProfile`
+
+## 8.4 Service Agreement
 
 * `CreateServiceAgreement`
 * `UpdateServiceAgreementRate`
 * `ActivateServiceAgreement`
 * `DeactivateServiceAgreement`
-* `ListCustomerServiceAgreements`
+* `ListCustomerProfileServiceAgreements`
 
-## 8.4 Time Entry
+## 8.5 Time Entry
 
 * `RecordTimeEntry`
 * `UpdateTimeEntry`
 * `DeleteDraftTimeEntry`
-* `ListCustomerTimeEntries`
+* `ListCustomerProfileTimeEntries`
 * `ListUnbilledTimeEntries`
 
-## 8.5 Invoice
+## 8.6 Invoice
 
 * `CreateDraftInvoice`
 * `CreateDraftInvoiceFromUnbilledTime`
@@ -477,9 +507,9 @@ Keep the app surface small and explicit.
 * `ListInvoices`
 * `RenderInvoicePDF`
 
-## 8.6 Issuer Profile
+## 8.7 Issuer Profile
 
-* `SetupIssuerProfile`
+* `CreateIssuerProfile`
 * `UpdateIssuerProfile`
 * `GetIssuerProfile`
 
@@ -490,22 +520,37 @@ Keep the app surface small and explicit.
 These are enough. No need to overname them as formal ports everywhere.
 
 ```go
-type CustomerService interface {
-    Create(ctx context.Context, cmd CreateCustomerCommand) (CustomerDTO, error)
-    Update(ctx context.Context, cmd UpdateCustomerCommand) (CustomerDTO, error)
-    Get(ctx context.Context, id string) (CustomerDTO, error)
-    List(ctx context.Context, filter CustomerFilter) ([]CustomerDTO, error)
+type LegalEntityService interface {
+    Create(ctx context.Context, cmd CreateLegalEntityCommand) (LegalEntityDTO, error)
+    Update(ctx context.Context, id string, cmd PatchLegalEntityCommand) (LegalEntityDTO, error)
+    Get(ctx context.Context, id string) (LegalEntityDTO, error)
+    List(ctx context.Context, query ListQuery) (ListResult[LegalEntityDTO], error)
+    Delete(ctx context.Context, id string) error
+}
+
+type CustomerProfileService interface {
+    Create(ctx context.Context, cmd CreateCustomerProfileCommand) (CustomerProfileDTO, error)
+    Update(ctx context.Context, id string, cmd PatchCustomerProfileCommand) (CustomerProfileDTO, error)
+    Get(ctx context.Context, id string) (CustomerProfileDTO, error)
+    List(ctx context.Context, query ListQuery) (ListResult[CustomerProfileDTO], error)
+    Delete(ctx context.Context, id string) error
+}
+
+type IssuerProfileService interface {
+    Create(ctx context.Context, cmd CreateIssuerProfileCommand) (IssuerProfileDTO, error)
+    Update(ctx context.Context, id string, cmd PatchIssuerProfileCommand) (IssuerProfileDTO, error)
+    Get(ctx context.Context, id string) (IssuerProfileDTO, error)
 }
 
 type AgreementService interface {
     Create(ctx context.Context, cmd CreateServiceAgreementCommand) (ServiceAgreementDTO, error)
     UpdateRate(ctx context.Context, cmd UpdateServiceAgreementRateCommand) (ServiceAgreementDTO, error)
-    ListByCustomer(ctx context.Context, customerID string) ([]ServiceAgreementDTO, error)
+    ListByCustomerProfile(ctx context.Context, customerProfileID string) ([]ServiceAgreementDTO, error)
 }
 
 type TimeEntryService interface {
     Record(ctx context.Context, cmd RecordTimeEntryCommand) (TimeEntryDTO, error)
-    ListUnbilled(ctx context.Context, customerID string, period DateRangeDTO) ([]TimeEntryDTO, error)
+    ListUnbilled(ctx context.Context, customerProfileID string, period DateRangeDTO) ([]TimeEntryDTO, error)
 }
 
 type InvoiceService interface {
@@ -529,31 +574,40 @@ These are practical dependencies required by the services.
 
 ```go
 type Store interface {
-    Customers() CustomerStore
+    LegalEntities() LegalEntityStore
+    CustomerProfiles() CustomerProfileStore
+    IssuerProfiles() IssuerProfileStore
     Agreements() ServiceAgreementStore
     TimeEntries() TimeEntryStore
     Invoices() InvoiceStore
-    IssuerProfile() IssuerProfileStore
     Session() SessionStore
     InTx(ctx context.Context, fn func(ctx context.Context, store Store) error) error
 }
 
-type CustomerStore interface {
-    Save(ctx context.Context, customer *Customer) error
-    GetByID(ctx context.Context, id string) (*Customer, error)
-    List(ctx context.Context, filter CustomerFilter) ([]*Customer, error)
+type LegalEntityStore interface {
+    Save(ctx context.Context, entity *LegalEntity) error
+    GetByID(ctx context.Context, id string) (*LegalEntity, error)
+    List(ctx context.Context, query ListQuery) (ListResult[LegalEntity], error)
+    Delete(ctx context.Context, id string) error
+}
+
+type CustomerProfileStore interface {
+    Save(ctx context.Context, profile *CustomerProfile) error
+    GetByID(ctx context.Context, id string) (*CustomerProfile, error)
+    List(ctx context.Context, query ListQuery) (ListResult[CustomerProfile], error)
+    Delete(ctx context.Context, id string) error
 }
 
 type ServiceAgreementStore interface {
     Save(ctx context.Context, agreement *ServiceAgreement) error
     GetByID(ctx context.Context, id string) (*ServiceAgreement, error)
-    ListByCustomerID(ctx context.Context, customerID string) ([]*ServiceAgreement, error)
+    ListByCustomerProfileID(ctx context.Context, customerProfileID string) ([]*ServiceAgreement, error)
 }
 
 type TimeEntryStore interface {
     Save(ctx context.Context, entry *TimeEntry) error
     GetByID(ctx context.Context, id string) (*TimeEntry, error)
-    ListUnbilledByCustomer(ctx context.Context, customerID string, period DateRange) ([]*TimeEntry, error)
+    ListUnbilledByCustomerProfile(ctx context.Context, customerProfileID string, period DateRange) ([]*TimeEntry, error)
 }
 
 type InvoiceStore interface {
@@ -564,7 +618,7 @@ type InvoiceStore interface {
 
 type IssuerProfileStore interface {
     Save(ctx context.Context, profile *IssuerProfile) error
-    Get(ctx context.Context) (*IssuerProfile, error)
+    GetByID(ctx context.Context, id string) (*IssuerProfile, error)
 }
 
 type SessionStore interface {
@@ -590,23 +644,37 @@ type PDFRenderer interface {
 ## 11. Commands / DTOs
 
 ```go
-type CreateCustomerCommand struct {
-    CustomerType string
-    LegalName    string
-    TradeName    string
-    TaxID        string
-    Email        string
-    Phone        string
-    Website      string
-    Currency     string
-    Address      AddressDTO
-    Notes        string
+type CreateLegalEntityCommand struct {
+    Type           string
+    LegalName      string
+    TradeName      string
+    TaxID          string
+    Email          string
+    Phone          string
+    Website        string
+    BillingAddress AddressDTO
+}
+```
+
+```go
+type CreateCustomerProfileCommand struct {
+    LegalEntityID   string
+    DefaultCurrency string
+    Notes           string
+}
+```
+
+```go
+type CreateIssuerProfileCommand struct {
+    LegalEntityID   string
+    DefaultCurrency string
+    DefaultNotes    string
 }
 ```
 
 ```go
 type CreateServiceAgreementCommand struct {
-    CustomerID   string
+    CustomerProfileID string
     Code         string
     Name         string
     Description  string
@@ -620,7 +688,7 @@ type CreateServiceAgreementCommand struct {
 
 ```go
 type RecordTimeEntryCommand struct {
-    CustomerID         string
+    CustomerProfileID  string
     ServiceAgreementID string
     WorkDate           time.Time
     Hours              int64
@@ -631,7 +699,7 @@ type RecordTimeEntryCommand struct {
 
 ```go
 type CreateDraftInvoiceFromUnbilledTimeCommand struct {
-    CustomerID string
+    CustomerProfileID string
     From       time.Time
     To         time.Time
     Notes      string
@@ -659,29 +727,41 @@ type AuthenticatedIdentity struct {
 ## 12. CLI Surface
 
 ```text
-invoice auth login
-invoice auth logout
-invoice auth status
+billar health
+billar status
 
-invoice issuer setup
-invoice issuer show
+billar legal-entity create
+billar legal-entity list
+billar legal-entity get
+billar legal-entity update
+billar legal-entity delete
 
-invoice customer create
-invoice customer list
-invoice customer get
+billar issuer create
+billar issuer get
+billar issuer update
 
-invoice agreement create
-invoice agreement list --customer <id>
-invoice agreement rate-update --id <id>
+billar customer create
+billar customer list
+billar customer get
+billar customer update
+billar customer delete
+```
 
-invoice time add
-invoice time list --customer <id>
-invoice time list-unbilled --customer <id>
+Planned downstream billing commands continue to reference the customer-facing role, now backed by `customer_profiles`:
 
-invoice invoice draft --customer <id> --from <date> --to <date>
-invoice invoice issue --id <id>
-invoice invoice show --id <id>
-invoice invoice pdf --id <id>
+```text
+billar agreement create
+billar agreement list --customer <customer-profile-id>
+billar agreement rate-update --id <id>
+
+billar time add
+billar time list --customer <customer-profile-id>
+billar time list-unbilled --customer <customer-profile-id>
+
+billar invoice draft --customer <customer-profile-id> --from <date> --to <date>
+billar invoice issue --id <id>
+billar invoice show --id <id>
+billar invoice pdf --id <id>
 ```
 
 ---
@@ -689,16 +769,24 @@ invoice invoice pdf --id <id>
 ## 13. MCP Tool Surface
 
 * `session.status`
-* `issuer.setup`
-* `issuer.get`
-* `customer.create`
-* `customer.get`
-* `customer.list`
+* `issuer_profile.create`
+* `issuer_profile.get`
+* `issuer_profile.update`
+* `legal_entity.create`
+* `legal_entity.get`
+* `legal_entity.list`
+* `legal_entity.update`
+* `legal_entity.delete`
+* `customer_profile.create`
+* `customer_profile.get`
+* `customer_profile.list`
+* `customer_profile.update`
+* `customer_profile.delete`
 * `agreement.create`
-* `agreement.list_by_customer`
+* `agreement.list_by_customer_profile`
 * `agreement.update_rate`
 * `time_entry.create`
-* `time_entry.list_by_customer`
+* `time_entry.list_by_customer_profile`
 * `time_entry.list_unbilled`
 * `invoice.create_draft_from_unbilled`
 * `invoice.get`
@@ -724,12 +812,13 @@ For MCP ingress, exact email allowlist or allowed domain remains required, and I
 
 Tables:
 
-* `customers`
+* `legal_entities`
+* `customer_profiles`
+* `issuer_profiles`
 * `service_agreements`
 * `time_entries`
 * `invoices`
 * `invoice_lines`
-* `issuer_profile`
 * `sessions`
 * `invoice_sequences`
 
@@ -749,7 +838,8 @@ cmd/
 
 internal/
   core/
-    customer.go
+    legal_entity.go
+    customer_profile.go
     service_agreement.go
     time_entry.go
     invoice.go
@@ -761,14 +851,16 @@ internal/
     rules.go
 
   app/
-    customer_service.go
+    legal_entity_service.go
+    customer_profile_service.go
     agreement_service.go
     time_entry_service.go
     invoice_service.go
-    issuer_service.go
+    issuer_profile_service.go
     session_service.go
-    dto.go
-    commands.go
+    legal_entity_dto.go
+    customer_profile_dto.go
+    issuer_profile_dto.go
 
   connectors/
     cli/
@@ -841,13 +933,15 @@ Build the first end-to-end billing loop:
 
 1. authenticate with a compatible MCP client or local CLI bypass
 2. establish authenticated access context
-3. configure issuer profile
-4. create customer
-5. create service agreement
-6. record time entry
-7. create draft invoice from unbilled time
-8. issue invoice
-9. render invoice PDF
+3. create legal entity for the issuer
+4. configure issuer profile
+5. create legal entity for the customer
+6. create customer profile
+7. create service agreement
+8. record time entry
+9. create draft invoice from unbilled time
+10. issue invoice
+11. render invoice PDF
 
 That is the correct first slice.
 
@@ -923,7 +1017,8 @@ Development default for the first runnable auth surface: Google OIDC with a loop
 
 The minimum stable internal model is:
 
-* `Customer`
+* `LegalEntity`
+* `CustomerProfile`
 * `ServiceAgreement`
 * `TimeEntry`
 * `Invoice`

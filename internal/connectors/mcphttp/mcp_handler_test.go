@@ -21,20 +21,14 @@ func TestV1MCPRouteUsesConnectorAuthenticatedIdentity(t *testing.T) {
 	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
 	mux := http.NewServeMux()
 	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{identity: app.AuthenticatedIdentity{Email: "person@example.com", EmailVerified: true}}, challenge, nil).Wrap(
-		mcpconnector.NewServer(app.NewRequestSessionService(app.ContextIdentitySource{}), routeCustomerServiceStub{result: app.ListResult[app.CustomerDTO]{
-			Items: []app.CustomerDTO{{
-				ID:              "cus_123",
-				Type:            "company",
-				LegalName:       "Acme SRL",
-				Status:          "active",
-				DefaultCurrency: "USD",
-				CreatedAt:       "2026-04-03T10:00:00Z",
-				UpdatedAt:       "2026-04-03T10:05:00Z",
-			}},
-			Total:    1,
-			Page:     1,
-			PageSize: 20,
-		}}, mcpconnector.NewIngressGuard(nil), nil).HTTPHandler(),
+		mcpconnector.NewServer(
+			app.NewRequestSessionService(app.ContextIdentitySource{}),
+			legalEntityProviderStub{},
+			issuerProfileProviderStub{},
+			customerProfileProviderStub{},
+			mcpconnector.NewIngressGuard(nil),
+			nil,
+		).HTTPHandler(),
 	))
 
 	httpServer := httptest.NewServer(mux)
@@ -75,19 +69,27 @@ func TestV1MCPRouteUsesConnectorAuthenticatedIdentity(t *testing.T) {
 	}
 }
 
-func TestV1MCPRouteChallengesUnauthenticatedRequest(t *testing.T) {
+func TestV1MCPRouteChallengesUnauthenticatedNonDiscoveryRequest(t *testing.T) {
 	t.Parallel()
 
 	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
 	mux := http.NewServeMux()
 	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{err: app.ErrMissingBearerToken}, challenge, nil).Wrap(
-		mcpconnector.NewServer(app.NewRequestSessionService(app.ContextIdentitySource{}), routeCustomerServiceStub{}, mcpconnector.NewIngressGuard(nil), nil).HTTPHandler(),
+		mcpconnector.NewServer(
+			app.NewRequestSessionService(app.ContextIdentitySource{}),
+			legalEntityProviderStub{},
+			issuerProfileProviderStub{},
+			customerProfileProviderStub{},
+			mcpconnector.NewIngressGuard(nil),
+			nil,
+		).HTTPHandler(),
 	))
 
 	httpServer := httptest.NewServer(mux)
 	defer httpServer.Close()
 
-	resp, err := http.Post(httpServer.URL+"/v1/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"test","version":"1.0.0"},"capabilities":{}}}`))
+	// Use a non-allowlisted method (tools/call) to test authentication challenge
+	resp, err := http.Post(httpServer.URL+"/v1/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"session.status"}}`))
 	if err != nil {
 		t.Fatalf("http.Post() error = %v", err)
 	}
@@ -101,22 +103,164 @@ func TestV1MCPRouteChallengesUnauthenticatedRequest(t *testing.T) {
 	}
 }
 
-type routeCustomerServiceStub struct {
-	result app.ListResult[app.CustomerDTO]
+func TestV1MCPRouteAllowsUnauthenticatedDiscoveryMethod(t *testing.T) {
+	t.Parallel()
+
+	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
+	mux := http.NewServeMux()
+	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{err: app.ErrMissingBearerToken}, challenge, nil).Wrap(
+		mcpconnector.NewServer(
+			app.NewRequestSessionService(app.ContextIdentitySource{}),
+			legalEntityProviderStub{},
+			issuerProfileProviderStub{},
+			customerProfileProviderStub{},
+			mcpconnector.NewIngressGuard(nil),
+			nil,
+		).HTTPHandler(),
+	))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	// Allowlisted method (initialize) should pass without authentication
+	resp, err := http.Post(httpServer.URL+"/v1/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"test","version":"1.0.0"},"capabilities":{}}}`))
+	if err != nil {
+		t.Fatalf("http.Post() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Discovery method should succeed without authentication
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
 }
 
-func (s routeCustomerServiceStub) List(context.Context, app.ListQuery) (app.ListResult[app.CustomerDTO], error) {
-	return s.result, nil
+func TestV1MCPRouteAllowsUnauthenticatedToolsListDiscovery(t *testing.T) {
+	t.Parallel()
+
+	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
+	mux := http.NewServeMux()
+	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{err: app.ErrMissingBearerToken}, challenge, nil).Wrap(
+		mcpconnector.NewServer(
+			app.NewRequestSessionService(app.ContextIdentitySource{}),
+			legalEntityProviderStub{},
+			issuerProfileProviderStub{},
+			customerProfileProviderStub{},
+			mcpconnector.NewIngressGuard(nil),
+			nil,
+		).HTTPHandler(),
+	))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	// Allowlisted method (tools/list) should pass authentication middleware without 401
+	// The MCP server may return 404 or other errors for protocol reasons (uninitialized session),
+	// but the request should NOT be rejected with 401 Unauthorized
+	resp, err := http.Post(httpServer.URL+"/v1/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
+	if err != nil {
+		t.Fatalf("http.Post() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Discovery method should NOT be rejected with 401 Unauthorized
+	if resp.StatusCode == http.StatusUnauthorized {
+		t.Fatalf("status = %d (Unauthorized), auth middleware should allow tools/list discovery without authentication", resp.StatusCode)
+	}
+	// 404 or other protocol errors are acceptable - auth allowed the request through
 }
 
-func (s routeCustomerServiceStub) Create(context.Context, app.CreateCustomerCommand) (app.CustomerDTO, error) {
-	return app.CustomerDTO{}, nil
+func TestV1MCPRouteAllowsUnauthenticatedNotificationsInitializedDiscovery(t *testing.T) {
+	t.Parallel()
+
+	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
+	mux := http.NewServeMux()
+	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{err: app.ErrMissingBearerToken}, challenge, nil).Wrap(
+		mcpconnector.NewServer(
+			app.NewRequestSessionService(app.ContextIdentitySource{}),
+			legalEntityProviderStub{},
+			issuerProfileProviderStub{},
+			customerProfileProviderStub{},
+			mcpconnector.NewIngressGuard(nil),
+			nil,
+		).HTTPHandler(),
+	))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	// Allowlisted method (notifications/initialized) should pass authentication middleware without 401
+	// Note: notifications/initialized is a JSON-RPC notification (no id field, no response expected)
+	// The MCP server may return various status codes, but auth should NOT reject with 401
+	resp, err := http.Post(httpServer.URL+"/v1/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}`))
+	if err != nil {
+		t.Fatalf("http.Post() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Discovery notification should NOT be rejected with 401 Unauthorized
+	if resp.StatusCode == http.StatusUnauthorized {
+		t.Fatalf("status = %d (Unauthorized), auth middleware should allow notifications/initialized discovery without authentication", resp.StatusCode)
+	}
+	// Other status codes are acceptable - auth allowed the request through
 }
 
-func (s routeCustomerServiceStub) Update(context.Context, string, app.PatchCustomerCommand) (app.CustomerDTO, error) {
-	return app.CustomerDTO{}, nil
+// Stub implementations for the new three-entity model
+
+type legalEntityProviderStub struct{}
+
+func (s legalEntityProviderStub) List(ctx context.Context, query app.ListQuery) (app.ListResult[app.LegalEntityDTO], error) {
+	return app.ListResult[app.LegalEntityDTO]{}, nil
 }
 
-func (s routeCustomerServiceStub) Delete(context.Context, string) error {
+func (s legalEntityProviderStub) Create(ctx context.Context, cmd app.CreateLegalEntityCommand) (app.LegalEntityDTO, error) {
+	return app.LegalEntityDTO{}, nil
+}
+
+func (s legalEntityProviderStub) Get(ctx context.Context, id string) (app.LegalEntityDTO, error) {
+	return app.LegalEntityDTO{}, nil
+}
+
+func (s legalEntityProviderStub) Update(ctx context.Context, id string, cmd app.PatchLegalEntityCommand) (app.LegalEntityDTO, error) {
+	return app.LegalEntityDTO{}, nil
+}
+
+func (s legalEntityProviderStub) Delete(ctx context.Context, id string) error {
+	return nil
+}
+
+type issuerProfileProviderStub struct{}
+
+func (s issuerProfileProviderStub) Create(ctx context.Context, cmd app.CreateIssuerProfileCommand) (app.IssuerProfileDTO, error) {
+	return app.IssuerProfileDTO{}, nil
+}
+
+func (s issuerProfileProviderStub) Get(ctx context.Context, id string) (app.IssuerProfileDTO, error) {
+	return app.IssuerProfileDTO{}, nil
+}
+
+func (s issuerProfileProviderStub) Update(ctx context.Context, id string, cmd app.PatchIssuerProfileCommand) (app.IssuerProfileDTO, error) {
+	return app.IssuerProfileDTO{}, nil
+}
+
+type customerProfileProviderStub struct{}
+
+func (s customerProfileProviderStub) List(ctx context.Context, query app.ListQuery) (app.ListResult[app.CustomerProfileDTO], error) {
+	return app.ListResult[app.CustomerProfileDTO]{}, nil
+}
+
+func (s customerProfileProviderStub) Create(ctx context.Context, cmd app.CreateCustomerProfileCommand) (app.CustomerProfileDTO, error) {
+	return app.CustomerProfileDTO{}, nil
+}
+
+func (s customerProfileProviderStub) Get(ctx context.Context, id string) (app.CustomerProfileDTO, error) {
+	return app.CustomerProfileDTO{}, nil
+}
+
+func (s customerProfileProviderStub) Update(ctx context.Context, id string, cmd app.PatchCustomerProfileCommand) (app.CustomerProfileDTO, error) {
+	return app.CustomerProfileDTO{}, nil
+}
+
+func (s customerProfileProviderStub) Delete(ctx context.Context, id string) error {
 	return nil
 }

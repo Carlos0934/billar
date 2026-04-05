@@ -15,27 +15,24 @@ type HealthStatusProvider interface {
 	Status(ctx context.Context) (app.HealthDTO, error)
 }
 
-type CustomerListProvider interface {
-	List(ctx context.Context, query app.ListQuery) (app.ListResult[app.CustomerDTO], error)
-}
-
-type CustomerServiceProvider interface {
-	CustomerListProvider
-	Create(ctx context.Context, cmd app.CreateCustomerCommand) (app.CustomerDTO, error)
-	Update(ctx context.Context, id string, cmd app.PatchCustomerCommand) (app.CustomerDTO, error)
-	Delete(ctx context.Context, id string) error
-}
-
 type Command struct {
 	health       HealthStatusProvider
-	customer     CustomerServiceProvider
+	legalEntity  LegalEntityServiceProvider
+	issuer       IssuerProfileServiceProvider
+	customer     CustomerProfileServiceProvider
 	colorEnabled bool
 }
 
-const commandUsage = "usage: billar <health|status|customer list|customer create|customer update|customer delete> [flags]"
+const commandUsage = "usage: billar <health|status|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>> [flags]"
 
-func NewCommand(health HealthStatusProvider, customer CustomerServiceProvider, colorEnabled bool) Command {
-	return Command{health: health, customer: customer, colorEnabled: colorEnabled}
+func NewCommand(health HealthStatusProvider, legalEntity LegalEntityServiceProvider, issuer IssuerProfileServiceProvider, customer CustomerProfileServiceProvider, colorEnabled bool) Command {
+	return Command{
+		health:       health,
+		legalEntity:  legalEntity,
+		issuer:       issuer,
+		customer:     customer,
+		colorEnabled: colorEnabled,
+	}
 }
 
 func (c Command) Run(ctx context.Context, args []string, out io.Writer) error {
@@ -48,35 +45,267 @@ func (c Command) Run(ctx context.Context, args []string, out io.Writer) error {
 	}
 
 	subcommand := strings.ToLower(args[0])
-	if subcommand != "health" && subcommand != "status" {
-		if subcommand != "customer" {
-			return fmt.Errorf("unknown command %q", args[0])
+	switch subcommand {
+	case "health", "status":
+		format, err := parseFormatFlag(subcommand, args[1:])
+		if err != nil {
+			return err
 		}
+
+		status, err := c.health.Status(ctx)
+		if err != nil {
+			return fmt.Errorf("run %s command: %w", subcommand, err)
+		}
+
+		result := OutputResult{
+			Payload: status,
+			TextWriter: func(w io.Writer) error {
+				return writeHealthText(w, status, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, result); err != nil {
+			return fmt.Errorf("write %s output: %w", subcommand, err)
+		}
+
+		return nil
+
+	case "legal-entity":
+		return c.runLegalEntity(ctx, args[1:], out)
+
+	case "issuer":
+		return c.runIssuer(ctx, args[1:], out)
+
+	case "customer":
 		return c.runCustomer(ctx, args[1:], out)
+
+	default:
+		return fmt.Errorf("unknown command %q", args[0])
+	}
+}
+
+func (c Command) runLegalEntity(ctx context.Context, args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return errors.New(commandUsage)
 	}
 
-	format, err := parseFormatFlag(subcommand, args[1:])
-	if err != nil {
-		return err
+	subcommand := strings.ToLower(args[0])
+	if c.legalEntity == nil {
+		return errors.New("legal entity service is required")
 	}
 
-	status, err := c.health.Status(ctx)
-	if err != nil {
-		return fmt.Errorf("run %s command: %w", subcommand, err)
+	switch subcommand {
+	case "list":
+		query, format, err := parseLegalEntityListFlags(args[1:])
+		if err != nil {
+			return err
+		}
+		query = query.Normalize()
+
+		result, err := c.legalEntity.List(ctx, query)
+		if err != nil {
+			return fmt.Errorf("run legal-entity list command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeLegalEntityListText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write legal-entity list output: %w", err)
+		}
+
+		return nil
+
+	case "create":
+		cmd, format, err := parseLegalEntityCreateFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.legalEntity.Create(ctx, cmd)
+		if err != nil {
+			return fmt.Errorf("run legal-entity create command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeLegalEntityCreateText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write legal-entity create output: %w", err)
+		}
+
+		return nil
+
+	case "get":
+		id, format, err := parseLegalEntityGetFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.legalEntity.Get(ctx, id)
+		if err != nil {
+			return fmt.Errorf("run legal-entity get command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeLegalEntityGetText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write legal-entity get output: %w", err)
+		}
+
+		return nil
+
+	case "update":
+		id, cmd, format, err := parseLegalEntityUpdateFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.legalEntity.Update(ctx, id, cmd)
+		if err != nil {
+			return fmt.Errorf("run legal-entity update command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeLegalEntityUpdateText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write legal-entity update output: %w", err)
+		}
+
+		return nil
+
+	case "delete":
+		id, format, err := parseLegalEntityDeleteFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		if err := c.legalEntity.Delete(ctx, id); err != nil {
+			return fmt.Errorf("run legal-entity delete command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: map[string]string{"id": id, "status": "deleted"},
+			TextWriter: func(w io.Writer) error {
+				return writeLegalEntityDeleteText(w, id, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write legal-entity delete output: %w", err)
+		}
+
+		return nil
+
+	default:
+		return fmt.Errorf("unknown command %q", strings.Join([]string{"legal-entity", args[0]}, " "))
+	}
+}
+
+func (c Command) runIssuer(ctx context.Context, args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return errors.New(commandUsage)
 	}
 
-	result := OutputResult{
-		Payload: status,
-		TextWriter: func(w io.Writer) error {
-			return writeHealthText(w, status, c.colorEnabled)
-		},
+	subcommand := strings.ToLower(args[0])
+	if c.issuer == nil {
+		return errors.New("issuer service is required")
 	}
 
-	if err := WriteOutput(out, format, result); err != nil {
-		return fmt.Errorf("write %s output: %w", subcommand, err)
-	}
+	switch subcommand {
+	case "create":
+		cmd, format, err := parseIssuerProfileCreateFlags(args[1:])
+		if err != nil {
+			return err
+		}
 
-	return nil
+		result, err := c.issuer.Create(ctx, cmd)
+		if err != nil {
+			return fmt.Errorf("run issuer create command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeIssuerProfileCreateText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write issuer create output: %w", err)
+		}
+
+		return nil
+
+	case "get":
+		id, format, err := parseIssuerProfileGetFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.issuer.Get(ctx, id)
+		if err != nil {
+			return fmt.Errorf("run issuer get command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeIssuerProfileGetText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write issuer get output: %w", err)
+		}
+
+		return nil
+
+	case "update":
+		id, cmd, format, err := parseIssuerProfileUpdateFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.issuer.Update(ctx, id, cmd)
+		if err != nil {
+			return fmt.Errorf("run issuer update command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeIssuerProfileUpdateText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write issuer update output: %w", err)
+		}
+
+		return nil
+
+	default:
+		return fmt.Errorf("unknown command %q", strings.Join([]string{"issuer", args[0]}, " "))
+	}
 }
 
 func (c Command) runCustomer(ctx context.Context, args []string, out io.Writer) error {
@@ -91,7 +320,7 @@ func (c Command) runCustomer(ctx context.Context, args []string, out io.Writer) 
 
 	switch subcommand {
 	case "list":
-		query, format, err := parseCustomerListFlags(args[1:])
+		query, format, err := parseCustomerProfileListFlags(args[1:])
 		if err != nil {
 			return err
 		}
@@ -105,7 +334,7 @@ func (c Command) runCustomer(ctx context.Context, args []string, out io.Writer) 
 		output := OutputResult{
 			Payload: result,
 			TextWriter: func(w io.Writer) error {
-				return writeCustomerListText(w, result, c.colorEnabled)
+				return writeCustomerProfileListText(w, result, c.colorEnabled)
 			},
 		}
 
@@ -116,7 +345,7 @@ func (c Command) runCustomer(ctx context.Context, args []string, out io.Writer) 
 		return nil
 
 	case "create":
-		cmd, format, err := parseCustomerCreateFlags(args[1:])
+		cmd, format, err := parseCustomerProfileCreateFlags(args[1:])
 		if err != nil {
 			return err
 		}
@@ -129,7 +358,7 @@ func (c Command) runCustomer(ctx context.Context, args []string, out io.Writer) 
 		output := OutputResult{
 			Payload: result,
 			TextWriter: func(w io.Writer) error {
-				return writeCustomerCreateText(w, result, c.colorEnabled)
+				return writeCustomerProfileCreateText(w, result, c.colorEnabled)
 			},
 		}
 
@@ -139,8 +368,32 @@ func (c Command) runCustomer(ctx context.Context, args []string, out io.Writer) 
 
 		return nil
 
+	case "get":
+		id, format, err := parseCustomerProfileGetFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.customer.Get(ctx, id)
+		if err != nil {
+			return fmt.Errorf("run customer get command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeCustomerProfileGetText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write customer get output: %w", err)
+		}
+
+		return nil
+
 	case "update":
-		id, cmd, format, err := parseCustomerUpdateFlags(args[1:])
+		id, cmd, format, err := parseCustomerProfileUpdateFlags(args[1:])
 		if err != nil {
 			return err
 		}
@@ -153,7 +406,7 @@ func (c Command) runCustomer(ctx context.Context, args []string, out io.Writer) 
 		output := OutputResult{
 			Payload: result,
 			TextWriter: func(w io.Writer) error {
-				return writeCustomerUpdateText(w, result, c.colorEnabled)
+				return writeCustomerProfileUpdateText(w, result, c.colorEnabled)
 			},
 		}
 
@@ -164,7 +417,7 @@ func (c Command) runCustomer(ctx context.Context, args []string, out io.Writer) 
 		return nil
 
 	case "delete":
-		id, format, err := parseCustomerDeleteFlags(args[1:])
+		id, format, err := parseCustomerProfileDeleteFlags(args[1:])
 		if err != nil {
 			return err
 		}
@@ -176,7 +429,7 @@ func (c Command) runCustomer(ctx context.Context, args []string, out io.Writer) 
 		output := OutputResult{
 			Payload: map[string]string{"id": id, "status": "deleted"},
 			TextWriter: func(w io.Writer) error {
-				return writeCustomerDeleteText(w, id, c.colorEnabled)
+				return writeCustomerProfileDeleteText(w, id, c.colorEnabled)
 			},
 		}
 

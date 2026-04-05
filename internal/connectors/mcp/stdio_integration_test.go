@@ -67,25 +67,40 @@ func TestMCPServerOverStdio(t *testing.T) {
 	for _, tool := range toolsResult.Tools {
 		gotToolNames = append(gotToolNames, tool.Name)
 	}
-	wantToolNames := []string{"customer.create", "customer.delete", "customer.list", "customer.update", "session.status"}
+	wantToolNames := []string{
+		"customer_profile.create",
+		"customer_profile.delete",
+		"customer_profile.get",
+		"customer_profile.list",
+		"customer_profile.update",
+		"issuer_profile.create",
+		"issuer_profile.get",
+		"issuer_profile.update",
+		"legal_entity.create",
+		"legal_entity.delete",
+		"legal_entity.get",
+		"legal_entity.list",
+		"legal_entity.update",
+		"session.status",
+	}
 	if !reflect.DeepEqual(gotToolNames, wantToolNames) {
 		t.Fatalf("ListTools() names = %v, want %v", gotToolNames, wantToolNames)
 	}
 
 	customerResult, err := mcpClient.CallTool(ctx, mcp.CallToolRequest{
-		Params: mcp.CallToolParams{Name: "customer.list"},
+		Params: mcp.CallToolParams{Name: "customer_profile.list"},
 	})
 	if err != nil {
-		t.Fatalf("CallTool(customer.list) error = %v", err)
+		t.Fatalf("CallTool(customer_profile.list) error = %v", err)
 	}
 	if customerResult.IsError {
-		t.Fatalf("CallTool(customer.list) returned tool error: %+v", customerResult)
+		t.Fatalf("CallTool(customer_profile.list) returned tool error: %+v", customerResult)
 	}
 	if len(customerResult.Content) != 1 {
-		t.Fatalf("CallTool(customer.list) content = %d items, want 1", len(customerResult.Content))
+		t.Fatalf("CallTool(customer_profile.list) content = %d items, want 1", len(customerResult.Content))
 	}
-	if got := mcp.GetTextFromContent(customerResult.Content[0]); got != "Billar Customers\n───────────────\nPage: 1\nPage size: 20\nTotal: 0\nNo customers found\n" {
-		t.Fatalf("CallTool(customer.list) text = %q", got)
+	if got := mcp.GetTextFromContent(customerResult.Content[0]); got != "Billar Customer Profiles\n───────────────\nPage: 1\nPage size: 20\nTotal: 0\nNo customer profiles found\n" {
+		t.Fatalf("CallTool(customer_profile.list) text = %q", got)
 	}
 
 	statusResult, err := mcpClient.CallTool(ctx, mcp.CallToolRequest{

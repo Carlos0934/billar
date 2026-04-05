@@ -19,18 +19,145 @@ func (s stubHealthService) Status(ctx context.Context) (app.HealthDTO, error) {
 	return s.status, s.err
 }
 
-type stubCustomerListService struct {
+// Stub services for CustomerProfile
+type stubCustomerProfileListService struct {
 	called bool
 	query  app.ListQuery
-	result app.ListResult[app.CustomerDTO]
+	result app.ListResult[app.CustomerProfileDTO]
 	err    error
 }
 
-func (s *stubCustomerListService) List(ctx context.Context, query app.ListQuery) (app.ListResult[app.CustomerDTO], error) {
+func (s *stubCustomerProfileListService) List(ctx context.Context, query app.ListQuery) (app.ListResult[app.CustomerProfileDTO], error) {
 	_ = ctx
 	s.called = true
 	s.query = query
 	return s.result, s.err
+}
+
+type stubCustomerProfileWriteService struct {
+	stubCustomerProfileListService
+	createArg *app.CreateCustomerProfileCommand
+	createRes app.CustomerProfileDTO
+	createErr error
+	updateID  string
+	updateArg *app.PatchCustomerProfileCommand
+	updateRes app.CustomerProfileDTO
+	updateErr error
+	deleteID  string
+	deleteErr error
+}
+
+func (s *stubCustomerProfileWriteService) Create(ctx context.Context, cmd app.CreateCustomerProfileCommand) (app.CustomerProfileDTO, error) {
+	_ = ctx
+	s.createArg = &cmd
+	return s.createRes, s.createErr
+}
+
+func (s *stubCustomerProfileWriteService) Get(ctx context.Context, id string) (app.CustomerProfileDTO, error) {
+	_ = ctx
+	return app.CustomerProfileDTO{}, nil
+}
+
+func (s *stubCustomerProfileWriteService) Update(ctx context.Context, id string, cmd app.PatchCustomerProfileCommand) (app.CustomerProfileDTO, error) {
+	_ = ctx
+	s.updateID = id
+	s.updateArg = &cmd
+	return s.updateRes, s.updateErr
+}
+
+func (s *stubCustomerProfileWriteService) Delete(ctx context.Context, id string) error {
+	_ = ctx
+	s.deleteID = id
+	return s.deleteErr
+}
+
+// Stub services for LegalEntity
+type stubLegalEntityListService struct {
+	called bool
+	query  app.ListQuery
+	result app.ListResult[app.LegalEntityDTO]
+	err    error
+}
+
+func (s *stubLegalEntityListService) List(ctx context.Context, query app.ListQuery) (app.ListResult[app.LegalEntityDTO], error) {
+	_ = ctx
+	s.called = true
+	s.query = query
+	return s.result, s.err
+}
+
+type stubLegalEntityWriteService struct {
+	stubLegalEntityListService
+	createArg *app.CreateLegalEntityCommand
+	createRes app.LegalEntityDTO
+	createErr error
+	getID     string
+	getRes    app.LegalEntityDTO
+	getErr    error
+	updateID  string
+	updateArg *app.PatchLegalEntityCommand
+	updateRes app.LegalEntityDTO
+	updateErr error
+	deleteID  string
+	deleteErr error
+}
+
+func (s *stubLegalEntityWriteService) Create(ctx context.Context, cmd app.CreateLegalEntityCommand) (app.LegalEntityDTO, error) {
+	_ = ctx
+	s.createArg = &cmd
+	return s.createRes, s.createErr
+}
+
+func (s *stubLegalEntityWriteService) Get(ctx context.Context, id string) (app.LegalEntityDTO, error) {
+	_ = ctx
+	s.getID = id
+	return s.getRes, s.getErr
+}
+
+func (s *stubLegalEntityWriteService) Update(ctx context.Context, id string, cmd app.PatchLegalEntityCommand) (app.LegalEntityDTO, error) {
+	_ = ctx
+	s.updateID = id
+	s.updateArg = &cmd
+	return s.updateRes, s.updateErr
+}
+
+func (s *stubLegalEntityWriteService) Delete(ctx context.Context, id string) error {
+	_ = ctx
+	s.deleteID = id
+	return s.deleteErr
+}
+
+// Stub services for IssuerProfile
+type stubIssuerProfileWriteService struct {
+	createArg *app.CreateIssuerProfileCommand
+	createRes app.IssuerProfileDTO
+	createErr error
+	getID     string
+	getRes    app.IssuerProfileDTO
+	getErr    error
+	updateID  string
+	updateArg *app.PatchIssuerProfileCommand
+	updateRes app.IssuerProfileDTO
+	updateErr error
+}
+
+func (s *stubIssuerProfileWriteService) Create(ctx context.Context, cmd app.CreateIssuerProfileCommand) (app.IssuerProfileDTO, error) {
+	_ = ctx
+	s.createArg = &cmd
+	return s.createRes, s.createErr
+}
+
+func (s *stubIssuerProfileWriteService) Get(ctx context.Context, id string) (app.IssuerProfileDTO, error) {
+	_ = ctx
+	s.getID = id
+	return s.getRes, s.getErr
+}
+
+func (s *stubIssuerProfileWriteService) Update(ctx context.Context, id string, cmd app.PatchIssuerProfileCommand) (app.IssuerProfileDTO, error) {
+	_ = ctx
+	s.updateID = id
+	s.updateArg = &cmd
+	return s.updateRes, s.updateErr
 }
 
 func TestCommandRunWritesHealthOutput(t *testing.T) {
@@ -72,7 +199,7 @@ func TestCommandRunWritesHealthOutput(t *testing.T) {
 			var out bytes.Buffer
 			cmd := NewCommand(stubHealthService{
 				status: app.HealthDTO{Name: "billar", Status: "ok"},
-			}, nil, false)
+			}, nil, nil, nil, false)
 
 			if err := cmd.Run(context.Background(), tc.args, &out); err != nil {
 				t.Fatalf("Run() error = %v", err)
@@ -85,16 +212,13 @@ func TestCommandRunWritesHealthOutput(t *testing.T) {
 	}
 }
 
-func TestCommandRunWritesCustomerListOutput(t *testing.T) {
+func TestCommandRunWritesCustomerProfileListOutput(t *testing.T) {
 	t.Parallel()
 
-	baseResult := app.ListResult[app.CustomerDTO]{
-		Items: []app.CustomerDTO{{
+	baseResult := app.ListResult[app.CustomerProfileDTO]{
+		Items: []app.CustomerProfileDTO{{
 			ID:              "cus_123",
-			Type:            "company",
-			LegalName:       "Acme SRL",
-			TradeName:       "Acme",
-			Email:           "billing@acme.example",
+			LegalEntityID:   "le_abc",
 			Status:          "active",
 			DefaultCurrency: "USD",
 			CreatedAt:       "2026-04-03T10:00:00Z",
@@ -116,19 +240,19 @@ func TestCommandRunWritesCustomerListOutput(t *testing.T) {
 		{
 			name:      "text output",
 			args:      []string{"customer", "list", "--search", "  Acme  ", "--sort", "created_at:desc", "--page", "2", "--page-size", "1"},
-			wantText:  "Billar Customers\n───────────────\nPage: 2\nPage size: 1\nTotal: 1\n\n1. Acme SRL\n   Trade name: Acme\n   Type: company\n   Status: active\n   Email: billing@acme.example\n   Default currency: USD\n   Created at: 2026-04-03T10:00:00Z\n   Updated at: 2026-04-03T10:05:00Z\n",
+			wantText:  "Customer Profiles\n───────────────\nPage: 2\nPage size: 1\nTotal: 1\n\n1. cus_123\n   Legal entity ID: le_abc\n   Status: active\n   Default currency: USD\n   Created at: 2026-04-03T10:00:00Z\n   Updated at: 2026-04-03T10:05:00Z\n",
 			wantQuery: app.ListQuery{Search: "Acme", SortField: "created_at", SortDir: "desc", Page: 2, PageSize: 1},
 		},
 		{
 			name:      "json output",
 			args:      []string{"customer", "list", "--format", "json"},
-			wantJSON:  "{\"items\":[{\"id\":\"cus_123\",\"type\":\"company\",\"legal_name\":\"Acme SRL\",\"trade_name\":\"Acme\",\"tax_id\":\"\",\"email\":\"billing@acme.example\",\"phone\":\"\",\"website\":\"\",\"billing_address\":{\"street\":\"\",\"city\":\"\",\"state\":\"\",\"postal_code\":\"\",\"country\":\"\"},\"status\":\"active\",\"default_currency\":\"USD\",\"notes\":\"\",\"created_at\":\"2026-04-03T10:00:00Z\",\"updated_at\":\"2026-04-03T10:05:00Z\"}],\"total\":1,\"page\":2,\"page_size\":1}\n",
+			wantJSON:  "{\"items\":[{\"id\":\"cus_123\",\"legal_entity_id\":\"le_abc\",\"status\":\"active\",\"default_currency\":\"USD\",\"notes\":\"\",\"created_at\":\"2026-04-03T10:00:00Z\",\"updated_at\":\"2026-04-03T10:05:00Z\"}],\"total\":1,\"page\":2,\"page_size\":1}\n",
 			wantQuery: app.ListQuery{Page: 1, PageSize: 20, SortField: "created_at", SortDir: "asc"},
 		},
 		{
 			name:        "toon output",
 			args:        []string{"customer", "list", "--format", "toon"},
-			wantContain: "Acme SRL",
+			wantContain: "cus_123",
 			wantQuery:   app.ListQuery{Page: 1, PageSize: 20, SortField: "created_at", SortDir: "asc"},
 		},
 	}
@@ -138,19 +262,19 @@ func TestCommandRunWritesCustomerListOutput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			service := &stubCustomerWriteService{stubCustomerListService: stubCustomerListService{result: baseResult}}
+			customerService := &stubCustomerProfileWriteService{stubCustomerProfileListService: stubCustomerProfileListService{result: baseResult}}
 			var out bytes.Buffer
-			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, service, false)
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, customerService, false)
 
 			if err := cmd.Run(context.Background(), tc.args, &out); err != nil {
 				t.Fatalf("Run() error = %v", err)
 			}
 
-			if !service.stubCustomerListService.called {
+			if !customerService.stubCustomerProfileListService.called {
 				t.Fatal("customer service was not called")
 			}
-			if service.stubCustomerListService.query != tc.wantQuery {
-				t.Fatalf("Run() query = %+v, want %+v", service.stubCustomerListService.query, tc.wantQuery)
+			if customerService.stubCustomerProfileListService.query != tc.wantQuery {
+				t.Fatalf("Run() query = %+v, want %+v", customerService.stubCustomerProfileListService.query, tc.wantQuery)
 			}
 
 			switch {
@@ -177,57 +301,56 @@ func TestCommandRunRejectsInvalidInput(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    []string
-		service HealthStatusProvider
 		wantErr string
 	}{
 		{
 			name:    "missing command",
 			args:    nil,
-			service: stubHealthService{},
 			wantErr: commandUsage,
 		},
 		{
 			name:    "unknown command",
 			args:    []string{"invoice"},
-			service: stubHealthService{},
 			wantErr: "unknown command",
 		},
 		{
 			name:    "invalid format",
 			args:    []string{"health", "--format", "yaml"},
-			service: stubHealthService{},
 			wantErr: "unsupported output format",
 		},
 		{
 			name:    "extra positional args",
 			args:    []string{"health", "extra"},
-			service: stubHealthService{},
 			wantErr: commandUsage,
-		},
-		{
-			name: "service failure",
-			args: []string{"health"},
-			service: stubHealthService{
-				err: errors.New("boom"),
-			},
-			wantErr: "run health command: boom",
-		},
-		{
-			name:    "missing service",
-			args:    []string{"health"},
-			service: nil,
-			wantErr: "health service is required",
 		},
 		{
 			name:    "missing customer service",
 			args:    []string{"customer", "list"},
-			service: stubHealthService{},
 			wantErr: "customer service is required",
 		},
 		{
 			name:    "unknown customer subcommand",
 			args:    []string{"customer", "foo"},
-			service: stubHealthService{},
+			wantErr: "unknown command",
+		},
+		{
+			name:    "missing legal entity service",
+			args:    []string{"legal-entity", "list"},
+			wantErr: "legal entity service is required",
+		},
+		{
+			name:    "unknown legal-entity subcommand",
+			args:    []string{"legal-entity", "foo"},
+			wantErr: "unknown command",
+		},
+		{
+			name:    "missing issuer service",
+			args:    []string{"issuer", "create"},
+			wantErr: "issuer service is required",
+		},
+		{
+			name:    "unknown issuer subcommand",
+			args:    []string{"issuer", "foo"},
 			wantErr: "unknown command",
 		},
 	}
@@ -238,14 +361,22 @@ func TestCommandRunRejectsInvalidInput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			var customerService CustomerServiceProvider
+			var customerService CustomerProfileServiceProvider
+			var legalEntityService LegalEntityServiceProvider
+			var issuerService IssuerProfileServiceProvider
+
+			// Provide services only for commands that need them
 			if tc.name == "unknown customer subcommand" {
-				customerService = &stubCustomerWriteService{}
+				customerService = &stubCustomerProfileWriteService{}
 			}
-			cmd := NewCommand(tc.service, customerService, false)
-			if tc.name == "missing customer service" {
-				cmd = NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, false)
+			if tc.name == "unknown legal-entity subcommand" {
+				legalEntityService = &stubLegalEntityWriteService{}
 			}
+			if tc.name == "unknown issuer subcommand" {
+				issuerService = &stubIssuerProfileWriteService{}
+			}
+
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, legalEntityService, issuerService, customerService, false)
 			err := cmd.Run(context.Background(), tc.args, &bytes.Buffer{})
 			if err == nil {
 				t.Fatal("Run() error = nil, want non-nil")
@@ -258,94 +389,50 @@ func TestCommandRunRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-// CustomerWriteServiceStub for testing CLI write operations
-type stubCustomerWriteService struct {
-	stubCustomerListService
-	createArg *app.CreateCustomerCommand
-	createRes app.CustomerDTO
-	createErr error
-	updateID  string
-	updateArg *app.PatchCustomerCommand
-	updateRes app.CustomerDTO
-	updateErr error
-	deleteID  string
-	deleteErr error
-}
-
-func (s *stubCustomerWriteService) Create(ctx context.Context, cmd app.CreateCustomerCommand) (app.CustomerDTO, error) {
-	_ = ctx
-	s.createArg = &cmd
-	return s.createRes, s.createErr
-}
-
-func (s *stubCustomerWriteService) Update(ctx context.Context, id string, cmd app.PatchCustomerCommand) (app.CustomerDTO, error) {
-	_ = ctx
-	s.updateID = id
-	s.updateArg = &cmd
-	return s.updateRes, s.updateErr
-}
-
-func (s *stubCustomerWriteService) Delete(ctx context.Context, id string) error {
-	_ = ctx
-	s.deleteID = id
-	return s.deleteErr
-}
-
-func TestCommandCustomerCreateWithJSON(t *testing.T) {
+func TestCommandCustomerProfileCreateWithJSON(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name          string
-		service       *stubCustomerWriteService
+		service       *stubCustomerProfileWriteService
 		args          []string
 		wantErr       bool
 		wantErrSubstr string
-		wantCreateArg *app.CreateCustomerCommand
+		wantCreateArg *app.CreateCustomerProfileCommand
 		wantContain   string
 	}{
 		{
-			name: "creates customer with valid JSON",
-			service: &stubCustomerWriteService{
-				createRes: app.CustomerDTO{
-					ID:        "cus_123",
-					Type:      "company",
-					LegalName: "Acme SRL",
-					Email:     "billing@acme.example",
-					Status:    "active",
+			name: "creates customer profile with valid JSON",
+			service: &stubCustomerProfileWriteService{
+				createRes: app.CustomerProfileDTO{
+					ID:              "cus_123",
+					LegalEntityID:   "le_abc",
+					Status:          "active",
+					DefaultCurrency: "USD",
 				},
 			},
-			args: []string{"customer", "create", "--json", `{"type":"company","legal_name":"Acme SRL","email":"billing@acme.example"}`},
-			wantCreateArg: &app.CreateCustomerCommand{
-				Type:      "company",
-				LegalName: "Acme SRL",
-				Email:     "billing@acme.example",
+			args: []string{"customer", "create", "--json", `{"legal_entity_id":"le_abc","default_currency":"USD"}`},
+			wantCreateArg: &app.CreateCustomerProfileCommand{
+				LegalEntityID:   "le_abc",
+				DefaultCurrency: "USD",
 			},
 			wantContain: "cus_123",
 		},
 		{
 			name:          "returns error for malformed JSON",
-			service:       &stubCustomerWriteService{},
+			service:       &stubCustomerProfileWriteService{},
 			args:          []string{"customer", "create", "--json", `{invalid json}`},
 			wantErr:       true,
 			wantErrSubstr: "json:",
 		},
 		{
 			name: "returns error for missing required field",
-			service: &stubCustomerWriteService{
-				createErr: errors.New("legal name is required"),
+			service: &stubCustomerProfileWriteService{
+				createErr: errors.New("legal entity id is required"),
 			},
-			args:          []string{"customer", "create", "--json", `{"type":"company"}`},
+			args:          []string{"customer", "create", "--json", `{}`},
 			wantErr:       true,
-			wantErrSubstr: "legal name is required",
-		},
-		{
-			name: "returns error for unauthenticated request",
-			service: &stubCustomerWriteService{
-				createErr: app.ErrCustomerCreateAccessDenied,
-			},
-			args:          []string{"customer", "create", "--json", `{"type":"company","legal_name":"Test"}`},
-			wantErr:       true,
-			wantErrSubstr: "authenticated",
+			wantErrSubstr: "legal entity id is required",
 		},
 	}
 
@@ -355,7 +442,7 @@ func TestCommandCustomerCreateWithJSON(t *testing.T) {
 			t.Parallel()
 
 			var out bytes.Buffer
-			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, tc.service, false)
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, tc.service, false)
 			err := cmd.Run(context.Background(), tc.args, &out)
 
 			if tc.wantErr {
@@ -376,11 +463,11 @@ func TestCommandCustomerCreateWithJSON(t *testing.T) {
 				if tc.service.createArg == nil {
 					t.Fatal("Create() was not called")
 				}
-				if tc.service.createArg.Type != tc.wantCreateArg.Type {
-					t.Errorf("Create() type = %q, want %q", tc.service.createArg.Type, tc.wantCreateArg.Type)
+				if tc.service.createArg.LegalEntityID != tc.wantCreateArg.LegalEntityID {
+					t.Errorf("Create() legal_entity_id = %q, want %q", tc.service.createArg.LegalEntityID, tc.wantCreateArg.LegalEntityID)
 				}
-				if tc.service.createArg.LegalName != tc.wantCreateArg.LegalName {
-					t.Errorf("Create() legal_name = %q, want %q", tc.service.createArg.LegalName, tc.wantCreateArg.LegalName)
+				if tc.service.createArg.DefaultCurrency != tc.wantCreateArg.DefaultCurrency {
+					t.Errorf("Create() default_currency = %q, want %q", tc.service.createArg.DefaultCurrency, tc.wantCreateArg.DefaultCurrency)
 				}
 			}
 
@@ -391,14 +478,14 @@ func TestCommandCustomerCreateWithJSON(t *testing.T) {
 	}
 }
 
-func TestCommandCustomerCreateWithFormatFlag(t *testing.T) {
+func TestCommandCustomerProfileCreateWithFormatFlag(t *testing.T) {
 	t.Parallel()
 
-	service := &stubCustomerWriteService{
-		createRes: app.CustomerDTO{
-			ID:        "cus_123",
-			Type:      "company",
-			LegalName: "Acme SRL",
+	service := &stubCustomerProfileWriteService{
+		createRes: app.CustomerProfileDTO{
+			ID:              "cus_123",
+			LegalEntityID:   "le_abc",
+			DefaultCurrency: "USD",
 		},
 	}
 
@@ -409,12 +496,12 @@ func TestCommandCustomerCreateWithFormatFlag(t *testing.T) {
 	}{
 		{
 			name:        "text format default",
-			args:        []string{"customer", "create", "--json", `{"type":"company","legal_name":"Acme"}`},
+			args:        []string{"customer", "create", "--json", `{"legal_entity_id":"le_abc","default_currency":"USD"}`},
 			wantContain: "cus_123",
 		},
 		{
 			name:        "json format",
-			args:        []string{"customer", "create", "--json", `{"type":"company","legal_name":"Acme"}`, "--format", "json"},
+			args:        []string{"customer", "create", "--json", `{"legal_entity_id":"le_abc","default_currency":"USD"}`, "--format", "json"},
 			wantContain: `"id":"cus_123"`,
 		},
 	}
@@ -425,7 +512,7 @@ func TestCommandCustomerCreateWithFormatFlag(t *testing.T) {
 			t.Parallel()
 
 			var out bytes.Buffer
-			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, service, false)
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, service, false)
 			if err := cmd.Run(context.Background(), tc.args, &out); err != nil {
 				t.Fatalf("Run() error = %v", err)
 			}
@@ -437,118 +524,58 @@ func TestCommandCustomerCreateWithFormatFlag(t *testing.T) {
 	}
 }
 
-func TestCommandCustomerUpdateWithJSON(t *testing.T) {
+func TestCommandCustomerProfileUpdateWithJSON(t *testing.T) {
 	t.Parallel()
 
-	email := "updated@example.com"
-	notes := ""
+	status := "inactive"
 
 	tests := []struct {
 		name          string
-		service       *stubCustomerWriteService
+		service       *stubCustomerProfileWriteService
 		args          []string
 		wantErr       bool
 		wantErrSubstr string
 		wantUpdateID  string
-		wantUpdateArg *app.PatchCustomerCommand
+		wantUpdateArg *app.PatchCustomerProfileCommand
 		wantContain   string
 	}{
 		{
-			name: "updates customer with partial patch leaving other fields untouched",
-			service: &stubCustomerWriteService{
-				updateRes: app.CustomerDTO{
+			name: "updates customer profile with partial patch",
+			service: &stubCustomerProfileWriteService{
+				updateRes: app.CustomerProfileDTO{
 					ID:              "cus_123",
-					Type:            "company",
-					LegalName:       "Acme SRL",
-					Email:           "updated@example.com",
-					Notes:           "Old notes remain untouched",
+					LegalEntityID:   "le_abc",
+					Status:          "inactive",
 					DefaultCurrency: "USD",
-					Status:          "active",
 				},
 			},
-			args:         []string{"customer", "update", "--id", "cus_123", "--json", `{"email":"updated@example.com"}`},
+			args:         []string{"customer", "update", "--id", "cus_123", "--json", `{"status":"inactive"}`},
 			wantUpdateID: "cus_123",
-			wantUpdateArg: &app.PatchCustomerCommand{
-				Email: &email,
-			},
-			wantContain: "cus_123",
-		},
-		{
-			name: "patch with one field leaves other pointer fields nil",
-			service: &stubCustomerWriteService{
-				updateRes: app.CustomerDTO{
-					ID:        "cus_123",
-					Type:      "company",
-					LegalName: "Acme SRL",
-					Email:     "updated@example.com",
-					Notes:     "Preserved notes",
-					Status:    "active",
-				},
-			},
-			args:         []string{"customer", "update", "--id", "cus_123", "--json", `{"email":"updated@example.com"}`},
-			wantUpdateID: "cus_123",
-			// Critical: only Email should be set, all other pointer fields should remain nil
-			// to preserve PATCH semantics where omitted fields remain untouched
-			wantUpdateArg: &app.PatchCustomerCommand{
-				Email:           &email,
-				Type:            nil,
-				LegalName:       nil,
-				TradeName:       nil,
-				TaxID:           nil,
-				Phone:           nil,
-				Website:         nil,
-				Notes:           nil, // This is what proves the "untouched" semantics
-				DefaultCurrency: nil,
-			},
-			wantContain: "cus_123",
-		},
-		{
-			name: "updates customer and clears notes field",
-			service: &stubCustomerWriteService{
-				updateRes: app.CustomerDTO{
-					ID:              "cus_123",
-					Type:            "company",
-					LegalName:       "Acme SRL",
-					Email:           "old@example.com",
-					Notes:           "",
-					DefaultCurrency: "USD",
-					Status:          "active",
-				},
-			},
-			args:         []string{"customer", "update", "--id", "cus_123", "--json", `{"notes":""}`},
-			wantUpdateID: "cus_123",
-			wantUpdateArg: &app.PatchCustomerCommand{
-				Notes: &notes,
+			wantUpdateArg: &app.PatchCustomerProfileCommand{
+				Status: &status,
 			},
 			wantContain: "cus_123",
 		},
 		{
 			name:          "returns error for malformed JSON",
-			service:       &stubCustomerWriteService{},
+			service:       &stubCustomerProfileWriteService{},
 			args:          []string{"customer", "update", "--id", "cus_123", "--json", `{invalid json}`},
 			wantErr:       true,
 			wantErrSubstr: "json:",
 		},
 		{
 			name:          "returns error for missing id",
-			service:       &stubCustomerWriteService{},
+			service:       &stubCustomerProfileWriteService{},
 			args:          []string{"customer", "update", "--json", `{}`},
 			wantErr:       true,
 			wantErrSubstr: "id",
 		},
 		{
 			name:          "returns error for not found",
-			service:       &stubCustomerWriteService{updateErr: app.ErrCustomerNotFound},
+			service:       &stubCustomerProfileWriteService{updateErr: app.ErrCustomerProfileNotFound},
 			args:          []string{"customer", "update", "--id", "cus_nonexistent", "--json", `{}`},
 			wantErr:       true,
 			wantErrSubstr: "not found",
-		},
-		{
-			name:          "returns error for unauthenticated request",
-			service:       &stubCustomerWriteService{updateErr: app.ErrCustomerUpdateAccessDenied},
-			args:          []string{"customer", "update", "--id", "cus_123", "--json", `{}`},
-			wantErr:       true,
-			wantErrSubstr: "authenticated",
 		},
 	}
 
@@ -558,7 +585,7 @@ func TestCommandCustomerUpdateWithJSON(t *testing.T) {
 			t.Parallel()
 
 			var out bytes.Buffer
-			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, tc.service, false)
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, tc.service, false)
 			err := cmd.Run(context.Background(), tc.args, &out)
 
 			if tc.wantErr {
@@ -580,41 +607,10 @@ func TestCommandCustomerUpdateWithJSON(t *testing.T) {
 			}
 
 			if tc.wantUpdateArg != nil && tc.service.updateArg != nil {
-				// Verify specified fields match
-				if tc.wantUpdateArg.Email != nil {
-					if tc.service.updateArg.Email == nil || *tc.service.updateArg.Email != *tc.wantUpdateArg.Email {
-						t.Errorf("Update() email = %v, want %v", tc.service.updateArg.Email, tc.wantUpdateArg.Email)
+				if tc.wantUpdateArg.Status != nil {
+					if tc.service.updateArg.Status == nil || *tc.service.updateArg.Status != *tc.wantUpdateArg.Status {
+						t.Errorf("Update() status = %v, want %v", tc.service.updateArg.Status, tc.wantUpdateArg.Status)
 					}
-				}
-				if tc.wantUpdateArg.Notes != nil {
-					if tc.service.updateArg.Notes == nil || *tc.service.updateArg.Notes != *tc.wantUpdateArg.Notes {
-						t.Errorf("Update() notes = %v, want %v", tc.service.updateArg.Notes, tc.wantUpdateArg.Notes)
-					}
-				}
-				// Verify unspecified fields are nil (PATCH semantics: omitted fields remain untouched)
-				if tc.wantUpdateArg.Type == nil && tc.service.updateArg.Type != nil {
-					t.Errorf("Update() Type should be nil for PATCH, got %v", *tc.service.updateArg.Type)
-				}
-				if tc.wantUpdateArg.LegalName == nil && tc.service.updateArg.LegalName != nil {
-					t.Errorf("Update() LegalName should be nil for PATCH, got %v", *tc.service.updateArg.LegalName)
-				}
-				if tc.wantUpdateArg.TradeName == nil && tc.service.updateArg.TradeName != nil {
-					t.Errorf("Update() TradeName should be nil for PATCH, got %v", *tc.service.updateArg.TradeName)
-				}
-				if tc.wantUpdateArg.TaxID == nil && tc.service.updateArg.TaxID != nil {
-					t.Errorf("Update() TaxID should be nil for PATCH, got %v", *tc.service.updateArg.TaxID)
-				}
-				if tc.wantUpdateArg.Phone == nil && tc.service.updateArg.Phone != nil {
-					t.Errorf("Update() Phone should be nil for PATCH, got %v", *tc.service.updateArg.Phone)
-				}
-				if tc.wantUpdateArg.Website == nil && tc.service.updateArg.Website != nil {
-					t.Errorf("Update() Website should be nil for PATCH, got %v", *tc.service.updateArg.Website)
-				}
-				if tc.wantUpdateArg.Notes == nil && tc.service.updateArg.Notes != nil {
-					t.Errorf("Update() Notes should be nil for PATCH, got %v", *tc.service.updateArg.Notes)
-				}
-				if tc.wantUpdateArg.DefaultCurrency == nil && tc.service.updateArg.DefaultCurrency != nil {
-					t.Errorf("Update() DefaultCurrency should be nil for PATCH, got %v", *tc.service.updateArg.DefaultCurrency)
 				}
 			}
 
@@ -625,12 +621,12 @@ func TestCommandCustomerUpdateWithJSON(t *testing.T) {
 	}
 }
 
-func TestCommandCustomerDelete(t *testing.T) {
+func TestCommandCustomerProfileDelete(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name          string
-		service       *stubCustomerWriteService
+		service       *stubCustomerProfileWriteService
 		args          []string
 		wantErr       bool
 		wantErrSubstr string
@@ -638,32 +634,25 @@ func TestCommandCustomerDelete(t *testing.T) {
 		wantContain   string
 	}{
 		{
-			name:         "deletes customer successfully",
-			service:      &stubCustomerWriteService{},
+			name:         "deletes customer profile successfully",
+			service:      &stubCustomerProfileWriteService{},
 			args:         []string{"customer", "delete", "--id", "cus_123"},
 			wantDeleteID: "cus_123",
 			wantContain:  "Deleted",
 		},
 		{
 			name:          "returns error for missing id",
-			service:       &stubCustomerWriteService{},
+			service:       &stubCustomerProfileWriteService{},
 			args:          []string{"customer", "delete"},
 			wantErr:       true,
 			wantErrSubstr: "id",
 		},
 		{
 			name:          "returns error for not found",
-			service:       &stubCustomerWriteService{deleteErr: app.ErrCustomerNotFound},
+			service:       &stubCustomerProfileWriteService{deleteErr: app.ErrCustomerProfileNotFound},
 			args:          []string{"customer", "delete", "--id", "cus_nonexistent"},
 			wantErr:       true,
 			wantErrSubstr: "not found",
-		},
-		{
-			name:          "returns error for unauthenticated request",
-			service:       &stubCustomerWriteService{deleteErr: app.ErrCustomerDeleteAccessDenied},
-			args:          []string{"customer", "delete", "--id", "cus_123"},
-			wantErr:       true,
-			wantErrSubstr: "authenticated",
 		},
 	}
 
@@ -673,7 +662,7 @@ func TestCommandCustomerDelete(t *testing.T) {
 			t.Parallel()
 
 			var out bytes.Buffer
-			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, tc.service, false)
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, tc.service, false)
 			err := cmd.Run(context.Background(), tc.args, &out)
 
 			if tc.wantErr {

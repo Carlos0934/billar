@@ -25,7 +25,7 @@ func TestOpenCreatesDatabaseAndRunsSchema(t *testing.T) {
 		t.Fatal("DB() = nil, want database handle")
 	}
 
-	if err := assertCustomersTableExists(store.DB()); err != nil {
+	if err := assertLegalEntitiesTableExists(store.DB()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -43,12 +43,27 @@ func TestOpenUsesTempDatabaseWhenPathIsBlank(t *testing.T) {
 		}
 	})
 
-	if err := assertCustomersTableExists(store.DB()); err != nil {
+	if err := assertLegalEntitiesTableExists(store.DB()); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func assertCustomersTableExists(db *sql.DB) error {
+func assertLegalEntitiesTableExists(db *sql.DB) error {
 	var name string
-	return db.QueryRowContext(context.Background(), `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'customers'`).Scan(&name)
+	return db.QueryRowContext(context.Background(), `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'legal_entities'`).Scan(&name)
+}
+
+func newTestStore(t *testing.T) *Store {
+	t.Helper()
+
+	store, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+	return store
 }

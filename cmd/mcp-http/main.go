@@ -36,24 +36,39 @@ func main() {
 
 	identityPolicy := app.IdentityPolicy{AllowedEmails: authCfg.AllowedEmails, AllowedDomains: authCfg.AllowedDomains}
 	requestAuthService := app.NewRequestAuthService(googleAccessTokenAuthenticator, identityPolicy)
-	customerStore, err := infrasqlite.Open(os.Getenv("BILLAR_DB_PATH"))
+	store, err := infrasqlite.Open(os.Getenv("BILLAR_DB_PATH"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	defer func() {
-		if err := customerStore.Close(); err != nil {
+		if err := store.Close(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}()
+
+	legalEntityStore := infrasqlite.NewLegalEntityStore(store)
+	issuerProfileStore := infrasqlite.NewIssuerProfileStore(store)
+	customerProfileStore := infrasqlite.NewCustomerProfileStore(store)
+
+	legalEntityService := app.NewLegalEntityService(legalEntityStore)
+	issuerProfileService := app.NewIssuerProfileService(legalEntityStore, issuerProfileStore)
+	customerProfileService := app.NewCustomerProfileService(legalEntityStore, customerProfileStore)
+
 	mcpSessionService := app.NewRequestSessionService(app.ContextIdentitySource{})
-	customerService := app.NewCustomerService(app.ContextIdentitySource{}, infrasqlite.NewCustomerStore(customerStore))
 	healthService := app.NewHealthService(appCfg.AppName)
 	mcpChallenge := app.OAuthChallengeDTO{
 		ResourceURI:          authCfg.ResourceServerURI,
 		AuthorizationServers: []string{authCfg.IssuerURL},
 	}
-	mcpServer := mcpconnector.NewServer(mcpSessionService, customerService, mcpconnector.NewIngressGuardFromConfig(appCfg.AccessPolicy), logger)
+	mcpServer := mcpconnector.NewServer(
+		mcpSessionService,
+		legalEntityService,
+		issuerProfileService,
+		customerProfileService,
+		mcpconnector.NewIngressGuardFromConfig(appCfg.AccessPolicy),
+		logger,
+	)
 	mcpAuthMiddleware := mcphttpconnector.NewMCPHTTPAuthMiddleware(requestAuthService, mcpChallenge, logger)
 
 	mux := http.NewServeMux()

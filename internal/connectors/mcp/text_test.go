@@ -43,28 +43,3 @@ func TestSessionStatusText(t *testing.T) {
 		})
 	}
 }
-
-func TestCustomerListText(t *testing.T) {
-	t.Parallel()
-
-	got := customerListText(app.ListResult[app.CustomerDTO]{
-		Items: []app.CustomerDTO{{
-			ID:              "cus_123",
-			Type:            "company",
-			LegalName:       "Acme SRL",
-			TradeName:       "Acme",
-			Email:           "billing@acme.example",
-			Status:          "active",
-			DefaultCurrency: "USD",
-			CreatedAt:       "2026-04-03T10:00:00Z",
-			UpdatedAt:       "2026-04-03T10:05:00Z",
-		}},
-		Total:    1,
-		Page:     2,
-		PageSize: 1,
-	})
-	want := "Billar Customers\n───────────────\nPage: 2\nPage size: 1\nTotal: 1\n\n1. Acme SRL\n   Trade name: Acme\n   Type: company\n   Status: active\n   Email: billing@acme.example\n   Default currency: USD\n   Created at: 2026-04-03T10:00:00Z\n   Updated at: 2026-04-03T10:05:00Z\n"
-	if got != want {
-		t.Fatalf("customerListText() = %q, want %q", got, want)
-	}
-}

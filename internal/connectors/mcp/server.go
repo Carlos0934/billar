@@ -15,18 +15,37 @@ type Server struct {
 	toolNames []string
 }
 
-type CustomerListProvider interface {
-	List(ctx context.Context, query app.ListQuery) (app.ListResult[app.CustomerDTO], error)
+type LegalEntityListProvider interface {
+	List(ctx context.Context, query app.ListQuery) (app.ListResult[app.LegalEntityDTO], error)
 }
 
-type CustomerServiceProvider interface {
-	CustomerListProvider
-	Create(ctx context.Context, cmd app.CreateCustomerCommand) (app.CustomerDTO, error)
-	Update(ctx context.Context, id string, cmd app.PatchCustomerCommand) (app.CustomerDTO, error)
+type LegalEntityWriteProvider interface {
+	LegalEntityListProvider
+	Create(ctx context.Context, cmd app.CreateLegalEntityCommand) (app.LegalEntityDTO, error)
+	Get(ctx context.Context, id string) (app.LegalEntityDTO, error)
+	Update(ctx context.Context, id string, cmd app.PatchLegalEntityCommand) (app.LegalEntityDTO, error)
 	Delete(ctx context.Context, id string) error
 }
 
-func NewServer(sessionService app.SessionService, customerService CustomerServiceProvider, guard IngressGuard, logger *slog.Logger) *Server {
+type IssuerProfileWriteProvider interface {
+	Create(ctx context.Context, cmd app.CreateIssuerProfileCommand) (app.IssuerProfileDTO, error)
+	Get(ctx context.Context, id string) (app.IssuerProfileDTO, error)
+	Update(ctx context.Context, id string, cmd app.PatchIssuerProfileCommand) (app.IssuerProfileDTO, error)
+}
+
+type CustomerProfileListProvider interface {
+	List(ctx context.Context, query app.ListQuery) (app.ListResult[app.CustomerProfileDTO], error)
+}
+
+type CustomerProfileWriteProvider interface {
+	CustomerProfileListProvider
+	Create(ctx context.Context, cmd app.CreateCustomerProfileCommand) (app.CustomerProfileDTO, error)
+	Get(ctx context.Context, id string) (app.CustomerProfileDTO, error)
+	Update(ctx context.Context, id string, cmd app.PatchCustomerProfileCommand) (app.CustomerProfileDTO, error)
+	Delete(ctx context.Context, id string) error
+}
+
+func NewServer(sessionService app.SessionService, legalEntity LegalEntityWriteProvider, issuer IssuerProfileWriteProvider, customer CustomerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) *Server {
 	mcpServer := mcpsrv.NewMCPServer(
 		"Billar MCP Session Surface",
 		"1.0.0",
@@ -34,7 +53,7 @@ func NewServer(sessionService app.SessionService, customerService CustomerServic
 		mcpsrv.WithRecovery(),
 	)
 
-	toolNames := registerTools(mcpServer, sessionService, customerService, guard, logger)
+	toolNames := registerTools(mcpServer, sessionService, legalEntity, issuer, customer, guard, logger)
 
 	return &Server{
 		server:    mcpServer,

@@ -25,6 +25,10 @@ func main() {
 		}
 	}()
 
+	legalEntityService := app.NewLegalEntityService(infrasqlite.NewLegalEntityStore(store))
+	issuerProfileService := app.NewIssuerProfileService(infrasqlite.NewLegalEntityStore(store), infrasqlite.NewIssuerProfileStore(store))
+	customerProfileService := app.NewCustomerProfileService(infrasqlite.NewLegalEntityStore(store), infrasqlite.NewCustomerProfileStore(store))
+
 	identities, err := app.NewLocalBypassIdentitySource(os.Getenv("BILLAR_LOCAL_AUTH_EMAIL"), app.IdentityPolicy{
 		AllowedEmails:  cfg.AccessPolicy.AllowedEmails,
 		AllowedDomains: cfg.AccessPolicy.AllowedDomains,
@@ -34,7 +38,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	server := mcpconnector.NewServer(app.NewRequestSessionService(identities), app.NewCustomerService(identities, infrasqlite.NewCustomerStore(store)), mcpconnector.NewIngressGuardFromConfig(cfg.AccessPolicy), logger)
+	server := mcpconnector.NewServer(
+		app.NewRequestSessionService(identities),
+		legalEntityService,
+		issuerProfileService,
+		customerProfileService,
+		mcpconnector.NewIngressGuardFromConfig(cfg.AccessPolicy),
+		logger,
+	)
 
 	if err := server.ServeStdio(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
