@@ -51,7 +51,6 @@ func main() {
 	issuerProfileStore := infrasqlite.NewIssuerProfileStore(store)
 	customerProfileStore := infrasqlite.NewCustomerProfileStore(store)
 
-	legalEntityService := app.NewLegalEntityService(legalEntityStore)
 	issuerProfileService := app.NewIssuerProfileService(legalEntityStore, issuerProfileStore)
 	customerProfileService := app.NewCustomerProfileService(legalEntityStore, customerProfileStore)
 
@@ -63,7 +62,6 @@ func main() {
 	}
 	mcpServer := mcpconnector.NewServer(
 		mcpSessionService,
-		legalEntityService,
 		issuerProfileService,
 		customerProfileService,
 		mcpconnector.NewIngressGuardFromConfig(appCfg.AccessPolicy),

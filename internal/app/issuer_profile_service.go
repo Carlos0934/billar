@@ -32,17 +32,24 @@ func (s IssuerProfileService) Create(ctx context.Context, cmd CreateIssuerProfil
 		return IssuerProfileDTO{}, errors.New("issuer profile store is required")
 	}
 
-	// Verify legal entity exists (FK resolution)
-	_, err := s.legalEntities.GetByID(ctx, cmd.LegalEntityID)
+	// Create the legal entity inline.
+	leSvc := LegalEntityService{store: s.legalEntities}
+	leDTO, err := leSvc.Create(ctx, CreateLegalEntityCommand{
+		Type:           cmd.LegalEntityType,
+		LegalName:      cmd.LegalName,
+		TradeName:      cmd.TradeName,
+		TaxID:          cmd.TaxID,
+		Email:          cmd.Email,
+		Phone:          cmd.Phone,
+		Website:        cmd.Website,
+		BillingAddress: cmd.BillingAddress,
+	})
 	if err != nil {
-		if errors.Is(err, ErrLegalEntityNotFound) {
-			return IssuerProfileDTO{}, ErrLegalEntityNotFound
-		}
-		return IssuerProfileDTO{}, fmt.Errorf("get legal entity: %w", err)
+		return IssuerProfileDTO{}, fmt.Errorf("create legal entity: %w", err)
 	}
 
 	profile, err := core.NewIssuerProfile(core.IssuerProfileParams{
-		LegalEntityID:   cmd.LegalEntityID,
+		LegalEntityID:   leDTO.ID,
 		DefaultCurrency: cmd.DefaultCurrency,
 		DefaultNotes:    cmd.DefaultNotes,
 	})
@@ -84,6 +91,17 @@ func (s IssuerProfileService) Update(ctx context.Context, id string, cmd PatchIs
 			return IssuerProfileDTO{}, ErrIssuerProfileNotFound
 		}
 		return IssuerProfileDTO{}, fmt.Errorf("get issuer profile: %w", err)
+	}
+
+	// Cascade legal entity fields when present.
+	if cmd.hasLegalEntityFields() {
+		if s.legalEntities == nil {
+			return IssuerProfileDTO{}, errors.New("legal entity store is required")
+		}
+		leSvc := LegalEntityService{store: s.legalEntities}
+		if _, err := leSvc.Update(ctx, profile.LegalEntityID, cmd.toLegalEntityPatch()); err != nil {
+			return IssuerProfileDTO{}, fmt.Errorf("update legal entity: %w", err)
+		}
 	}
 
 	patch := patchToCoreIssuerProfilePatch(cmd)

@@ -76,11 +76,6 @@ func TestMCPServerOverStdio(t *testing.T) {
 		"issuer_profile.create",
 		"issuer_profile.get",
 		"issuer_profile.update",
-		"legal_entity.create",
-		"legal_entity.delete",
-		"legal_entity.get",
-		"legal_entity.list",
-		"legal_entity.update",
 		"session.status",
 	}
 	if !reflect.DeepEqual(gotToolNames, wantToolNames) {

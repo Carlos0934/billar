@@ -771,16 +771,11 @@ billar invoice pdf --id <id>
 * `session.status`
 * `issuer_profile.create`
 * `issuer_profile.get`
-* `issuer_profile.update`
-* `legal_entity.create`
-* `legal_entity.get`
-* `legal_entity.list`
-* `legal_entity.update`
-* `legal_entity.delete`
+* `issuer_profile.update` — accepts inline legal entity fields (`type`, `legal_name`, `trade_name`, `tax_id`, `email`, `phone`, `website`, `billing_address`); cascades to the linked legal entity
 * `customer_profile.create`
 * `customer_profile.get`
 * `customer_profile.list`
-* `customer_profile.update`
+* `customer_profile.update` — accepts inline legal entity fields (`type`, `legal_name`, `trade_name`, `tax_id`, `email`, `phone`, `website`, `billing_address`); cascades to the linked legal entity
 * `customer_profile.delete`
 * `agreement.create`
 * `agreement.list_by_customer_profile`
@@ -793,6 +788,14 @@ billar invoice pdf --id <id>
 * `invoice.list`
 * `invoice.issue`
 * `invoice.render_pdf`
+
+**Removed tools** (legal entity is always accessed via its owning profile, never directly):
+
+* ~~`legal_entity.create`~~ — use `customer_profile.create` or `issuer_profile.create`
+* ~~`legal_entity.get`~~ — profile responses include `legal_entity_id`; full legal entity fields are updated via `customer_profile.update` or `issuer_profile.update`
+* ~~`legal_entity.list`~~ — list via profile tools
+* ~~`legal_entity.update`~~ — use `customer_profile.update` or `issuer_profile.update`
+* ~~`legal_entity.delete`~~ — legal entities are lifecycle-managed by their profiles
 
 ### Rule
 

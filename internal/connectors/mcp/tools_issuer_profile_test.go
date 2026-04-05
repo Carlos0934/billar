@@ -52,7 +52,7 @@ func TestIssuerProfileCreateToolHandlers(t *testing.T) {
 		wantResult    string
 	}{
 		{
-			name: "creates issuer profile successfully",
+			name: "creates issuer profile successfully with inline legal entity",
 			service: &issuerProfileServiceStub{
 				createRes: app.IssuerProfileDTO{
 					ID:              "iss_123",
@@ -61,26 +61,28 @@ func TestIssuerProfileCreateToolHandlers(t *testing.T) {
 				},
 			},
 			arguments: map[string]any{
-				"legal_entity_id":  "le_456",
+				"type":             "company",
+				"legal_name":       "Acme SRL",
 				"default_currency": "USD",
 			},
 			wantCreateArg: &app.CreateIssuerProfileCommand{
-				LegalEntityID:   "le_456",
+				LegalEntityType: "company",
+				LegalName:       "Acme SRL",
 				DefaultCurrency: "USD",
 			},
 			wantResult: "Issuer profile created: iss_123\nLegal entity ID: le_456\nDefault currency: USD\n",
 		},
 		{
-			name: "returns error for orphaned legal entity",
+			name: "returns error when service rejects command",
 			service: &issuerProfileServiceStub{
-				createErr: app.ErrLegalEntityNotFound,
+				createErr: errors.New("legal name is required"),
 			},
 			arguments: map[string]any{
-				"legal_entity_id":  "le_nonexistent",
+				"type":             "company",
 				"default_currency": "USD",
 			},
 			wantErr:       true,
-			wantErrSubstr: "not found",
+			wantErrSubstr: "legal name is required",
 		},
 	}
 
@@ -115,13 +117,118 @@ func TestIssuerProfileCreateToolHandlers(t *testing.T) {
 				if tc.service.createArg == nil {
 					t.Fatal("Create() was not called")
 				}
-				if tc.service.createArg.LegalEntityID != tc.wantCreateArg.LegalEntityID {
-					t.Errorf("Create() legal_entity_id = %q, want %q", tc.service.createArg.LegalEntityID, tc.wantCreateArg.LegalEntityID)
+				if tc.service.createArg.LegalEntityType != tc.wantCreateArg.LegalEntityType {
+					t.Errorf("Create() type = %q, want %q", tc.service.createArg.LegalEntityType, tc.wantCreateArg.LegalEntityType)
+				}
+				if tc.service.createArg.LegalName != tc.wantCreateArg.LegalName {
+					t.Errorf("Create() legal_name = %q, want %q", tc.service.createArg.LegalName, tc.wantCreateArg.LegalName)
+				}
+				if tc.service.createArg.DefaultCurrency != tc.wantCreateArg.DefaultCurrency {
+					t.Errorf("Create() default_currency = %q, want %q", tc.service.createArg.DefaultCurrency, tc.wantCreateArg.DefaultCurrency)
 				}
 			}
 
 			if got := mcp.GetTextFromContent(result.Content[0]); got != tc.wantResult {
 				t.Errorf("handler text = %q, want %q", got, tc.wantResult)
+			}
+		})
+	}
+}
+
+func TestIssuerProfileUpdateToolHandlers_LEFields(t *testing.T) {
+	t.Parallel()
+
+	legalName := "Acme Corp"
+
+	tests := []struct {
+		name          string
+		service       *issuerProfileServiceStub
+		arguments     map[string]any
+		wantErr       bool
+		wantErrSubstr string
+		wantUpdateID  string
+		wantUpdateArg *app.PatchIssuerProfileCommand
+	}{
+		{
+			name: "passes legal_name LE field in patch command",
+			service: &issuerProfileServiceStub{
+				updateRes: app.IssuerProfileDTO{
+					ID:            "iss_123",
+					LegalEntityID: "le_456",
+				},
+			},
+			arguments: map[string]any{
+				"id":         "iss_123",
+				"legal_name": "Acme Corp",
+			},
+			wantUpdateID: "iss_123",
+			wantUpdateArg: &app.PatchIssuerProfileCommand{
+				LegalName: &legalName,
+			},
+		},
+		{
+			name: "passes billing_address LE field in patch command",
+			service: &issuerProfileServiceStub{
+				updateRes: app.IssuerProfileDTO{
+					ID:            "iss_123",
+					LegalEntityID: "le_456",
+				},
+			},
+			arguments: map[string]any{
+				"id":              "iss_123",
+				"billing_address": map[string]any{"country": "DO", "city": "Santo Domingo"},
+			},
+			wantUpdateID: "iss_123",
+		},
+		{
+			name: "returns service error for LE cascade failure",
+			service: &issuerProfileServiceStub{
+				updateErr: app.ErrIssuerProfileNotFound,
+			},
+			arguments:     map[string]any{"id": "iss_nonexistent", "legal_name": "X"},
+			wantErr:       true,
+			wantErrSubstr: "not found",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, handler := issuerProfileUpdateTool(tc.service, NewIngressGuard(nil), nil)
+			result, err := handler(context.Background(), mcp.CallToolRequest{
+				Params: mcp.CallToolParams{Name: "issuer_profile.update", Arguments: tc.arguments},
+			})
+			if err != nil {
+				t.Fatalf("handler error = %v", err)
+			}
+
+			if tc.wantErr {
+				if result == nil || !result.IsError {
+					t.Fatalf("handler result = %+v, want error result", result)
+				}
+				if tc.wantErrSubstr != "" && !strings.Contains(mcp.GetTextFromContent(result.Content[0]), tc.wantErrSubstr) {
+					t.Fatalf("handler error = %q, want substring %q", mcp.GetTextFromContent(result.Content[0]), tc.wantErrSubstr)
+				}
+				return
+			}
+
+			if result == nil || result.IsError {
+				t.Fatalf("handler result = %+v, want success result", result)
+			}
+
+			if tc.wantUpdateID != "" && tc.service.updateID != tc.wantUpdateID {
+				t.Errorf("Update() id = %q, want %q", tc.service.updateID, tc.wantUpdateID)
+			}
+
+			if tc.wantUpdateArg != nil && tc.wantUpdateArg.LegalName != nil {
+				if tc.service.updateArg == nil || tc.service.updateArg.LegalName == nil {
+					t.Fatal("Update() LegalName not set")
+				}
+				if *tc.service.updateArg.LegalName != *tc.wantUpdateArg.LegalName {
+					t.Errorf("Update() LegalName = %q, want %q", *tc.service.updateArg.LegalName, *tc.wantUpdateArg.LegalName)
+				}
 			}
 		})
 	}

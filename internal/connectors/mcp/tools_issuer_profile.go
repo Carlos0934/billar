@@ -34,19 +34,57 @@ func issuerProfileCreateTool(service IssuerProfileWriteProvider, guard IngressGu
 	tool := mcp.NewTool("issuer_profile.create",
 		mcp.WithDescription(`Create a new issuer profile.
 
-An issuer profile represents the billing operator (your own company) linked to a legal entity.
+An issuer profile represents the billing operator (your own company). The underlying legal entity is created automatically from the fields provided here.
+
+FIELD NAMING (IMPORTANT):
+- Use 'type', NOT 'entity_type' — the field is named 'type' (string: "company" or "individual")
+- Use 'legal_name', NOT 'name' — the field is named 'legal_name' (official/legal name)
+- Use 'billing_address.country', NOT top-level 'country' — address fields are nested inside 'billing_address'
 
 REQUIRED FIELDS:
-- legal_entity_id: The ID of the legal entity this profile belongs to
+- type: Entity type — must be exactly "company" or "individual"
+- legal_name: Official/legal name of the entity
+- default_currency: Default currency for invoices (ISO 4217 code, e.g., 'USD', 'DOP')
 
 OPTIONAL FIELDS:
-- default_currency: Default currency for invoices (ISO 4217 code, e.g., 'USD', 'DOP')
+- trade_name, tax_id, email, phone, website, billing_address
 - default_notes: Default notes included on invoices`),
-		mcp.WithString("legal_entity_id",
+		mcp.WithString("type",
 			mcp.Required(),
-			mcp.Description("Legal entity ID this profile belongs to (e.g., 'le_123')"),
+			mcp.Description("Entity type: MUST be 'company' or 'individual'. Do NOT use 'entity_type' — the field name is 'type'."),
+			mcp.Enum("company", "individual"),
+		),
+		mcp.WithString("legal_name",
+			mcp.Required(),
+			mcp.Description("Official/legal name of the entity. Do NOT use 'name' — the field name is 'legal_name'."),
+		),
+		mcp.WithString("trade_name",
+			mcp.Description("Optional commercial or trading name"),
+		),
+		mcp.WithString("tax_id",
+			mcp.Description("Tax identification number (e.g., RNC, NIT, or similar)"),
+		),
+		mcp.WithString("email",
+			mcp.Description("Primary contact email address"),
+		),
+		mcp.WithString("phone",
+			mcp.Description("Primary contact phone number"),
+		),
+		mcp.WithString("website",
+			mcp.Description("Entity website URL"),
+		),
+		mcp.WithObject("billing_address",
+			mcp.Description("Billing address details. All address data (including country) must be nested inside this object."),
+			mcp.Properties(map[string]any{
+				"street":      map[string]any{"type": "string", "description": "Street address line"},
+				"city":        map[string]any{"type": "string", "description": "City or municipality"},
+				"state":       map[string]any{"type": "string", "description": "State, province, or region"},
+				"postal_code": map[string]any{"type": "string", "description": "Postal or ZIP code"},
+				"country":     map[string]any{"type": "string", "description": "Country code or name (e.g., 'DO'). Must be inside billing_address."},
+			}),
 		),
 		mcp.WithString("default_currency",
+			mcp.Required(),
 			mcp.Description("Default currency for billing (ISO 4217 code, e.g., 'USD', 'DOP', 'EUR')"),
 		),
 		mcp.WithString("default_notes",
@@ -63,9 +101,23 @@ OPTIONAL FIELDS:
 		}
 
 		cmd := app.CreateIssuerProfileCommand{
-			LegalEntityID:   strings.TrimSpace(req.GetString("legal_entity_id", "")),
+			LegalEntityType: strings.TrimSpace(req.GetString("type", "")),
+			LegalName:       strings.TrimSpace(req.GetString("legal_name", "")),
+			TradeName:       strings.TrimSpace(req.GetString("trade_name", "")),
+			TaxID:           strings.TrimSpace(req.GetString("tax_id", "")),
+			Email:           strings.TrimSpace(req.GetString("email", "")),
+			Phone:           strings.TrimSpace(req.GetString("phone", "")),
+			Website:         strings.TrimSpace(req.GetString("website", "")),
 			DefaultCurrency: strings.TrimSpace(req.GetString("default_currency", "")),
 			DefaultNotes:    strings.TrimSpace(req.GetString("default_notes", "")),
+		}
+
+		// Extract billing address if provided
+		args := req.GetArguments()
+		if addr, ok := args["billing_address"]; ok && addr != nil {
+			if addrMap, ok := addr.(map[string]any); ok {
+				cmd.BillingAddress = extractAddressDTO(addrMap)
+			}
 		}
 
 		result, err := service.Create(ctx, cmd)
@@ -113,7 +165,10 @@ func issuerProfileUpdateTool(service IssuerProfileWriteProvider, guard IngressGu
 		mcp.WithDescription(`Update an existing issuer profile with partial patch.
 
 Only provided fields will be updated; omitted fields remain unchanged.
-Use empty string "" to clear an optional field.`),
+Use empty string "" to clear an optional field.
+
+Legal entity fields (type, legal_name, trade_name, tax_id, email, phone, website, billing_address)
+are cascaded to the linked legal entity when provided.`),
 		mcp.WithString("id",
 			mcp.Required(),
 			mcp.Description("Issuer profile ID to update (e.g., 'iss_123')"),
@@ -123,6 +178,38 @@ Use empty string "" to clear an optional field.`),
 		),
 		mcp.WithString("default_notes",
 			mcp.Description("Update default invoice notes. Use empty string '' to clear."),
+		),
+		mcp.WithString("type",
+			mcp.Description("Update entity type: 'company' or 'individual'. Cascaded to linked legal entity."),
+			mcp.Enum("company", "individual"),
+		),
+		mcp.WithString("legal_name",
+			mcp.Description("Update official/legal name. Cascaded to linked legal entity."),
+		),
+		mcp.WithString("trade_name",
+			mcp.Description("Update commercial or trading name. Cascaded to linked legal entity. Use empty string '' to clear."),
+		),
+		mcp.WithString("tax_id",
+			mcp.Description("Update tax identification number. Cascaded to linked legal entity. Use empty string '' to clear."),
+		),
+		mcp.WithString("email",
+			mcp.Description("Update primary contact email. Cascaded to linked legal entity. Use empty string '' to clear."),
+		),
+		mcp.WithString("phone",
+			mcp.Description("Update primary contact phone. Cascaded to linked legal entity. Use empty string '' to clear."),
+		),
+		mcp.WithString("website",
+			mcp.Description("Update website URL. Cascaded to linked legal entity. Use empty string '' to clear."),
+		),
+		mcp.WithObject("billing_address",
+			mcp.Description("Update billing address. Cascaded to linked legal entity. All address fields must be nested inside this object."),
+			mcp.Properties(map[string]any{
+				"street":      map[string]any{"type": "string", "description": "Street address line"},
+				"city":        map[string]any{"type": "string", "description": "City or municipality"},
+				"state":       map[string]any{"type": "string", "description": "State, province, or region"},
+				"postal_code": map[string]any{"type": "string", "description": "Postal or ZIP code"},
+				"country":     map[string]any{"type": "string", "description": "Country code or name (e.g., 'DO'). Must be inside billing_address."},
+			}),
 		),
 	)
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -147,6 +234,34 @@ Use empty string "" to clear an optional field.`),
 		}
 		if _, provided := args["default_notes"]; provided {
 			cmd.DefaultNotes = ptrTo(strings.TrimSpace(req.GetString("default_notes", "")))
+		}
+		// Legal entity fields — cascaded to the linked entity.
+		if _, provided := args["type"]; provided {
+			cmd.LegalEntityType = ptrTo(strings.TrimSpace(req.GetString("type", "")))
+		}
+		if _, provided := args["legal_name"]; provided {
+			cmd.LegalName = ptrTo(strings.TrimSpace(req.GetString("legal_name", "")))
+		}
+		if _, provided := args["trade_name"]; provided {
+			cmd.TradeName = ptrTo(strings.TrimSpace(req.GetString("trade_name", "")))
+		}
+		if _, provided := args["tax_id"]; provided {
+			cmd.TaxID = ptrTo(strings.TrimSpace(req.GetString("tax_id", "")))
+		}
+		if _, provided := args["email"]; provided {
+			cmd.Email = ptrTo(strings.TrimSpace(req.GetString("email", "")))
+		}
+		if _, provided := args["phone"]; provided {
+			cmd.Phone = ptrTo(strings.TrimSpace(req.GetString("phone", "")))
+		}
+		if _, provided := args["website"]; provided {
+			cmd.Website = ptrTo(strings.TrimSpace(req.GetString("website", "")))
+		}
+		if addr, ok := args["billing_address"]; ok && addr != nil {
+			if addrMap, ok := addr.(map[string]any); ok {
+				addrDTO := extractAddressDTO(addrMap)
+				cmd.BillingAddress = &addrDTO
+			}
 		}
 
 		result, err := service.Update(ctx, id, cmd)

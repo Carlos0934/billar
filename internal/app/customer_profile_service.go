@@ -59,17 +59,24 @@ func (s CustomerProfileService) Create(ctx context.Context, cmd CreateCustomerPr
 		return CustomerProfileDTO{}, errors.New("customer profile store is required")
 	}
 
-	// Verify legal entity exists (FK resolution)
-	_, err := s.legalEntities.GetByID(ctx, cmd.LegalEntityID)
+	// Create the legal entity inline.
+	leSvc := LegalEntityService{store: s.legalEntities}
+	leDTO, err := leSvc.Create(ctx, CreateLegalEntityCommand{
+		Type:           cmd.LegalEntityType,
+		LegalName:      cmd.LegalName,
+		TradeName:      cmd.TradeName,
+		TaxID:          cmd.TaxID,
+		Email:          cmd.Email,
+		Phone:          cmd.Phone,
+		Website:        cmd.Website,
+		BillingAddress: cmd.BillingAddress,
+	})
 	if err != nil {
-		if errors.Is(err, ErrLegalEntityNotFound) {
-			return CustomerProfileDTO{}, ErrLegalEntityNotFound
-		}
-		return CustomerProfileDTO{}, fmt.Errorf("get legal entity: %w", err)
+		return CustomerProfileDTO{}, fmt.Errorf("create legal entity: %w", err)
 	}
 
 	profile, err := core.NewCustomerProfile(core.CustomerProfileParams{
-		LegalEntityID:   cmd.LegalEntityID,
+		LegalEntityID:   leDTO.ID,
 		DefaultCurrency: cmd.DefaultCurrency,
 		Notes:           cmd.Notes,
 	})
@@ -111,6 +118,17 @@ func (s CustomerProfileService) Update(ctx context.Context, id string, cmd Patch
 			return CustomerProfileDTO{}, ErrCustomerProfileNotFound
 		}
 		return CustomerProfileDTO{}, fmt.Errorf("get customer profile: %w", err)
+	}
+
+	// Cascade legal entity fields when present.
+	if cmd.hasLegalEntityFields() {
+		if s.legalEntities == nil {
+			return CustomerProfileDTO{}, errors.New("legal entity store is required")
+		}
+		leSvc := LegalEntityService{store: s.legalEntities}
+		if _, err := leSvc.Update(ctx, profile.LegalEntityID, cmd.toLegalEntityPatch()); err != nil {
+			return CustomerProfileDTO{}, fmt.Errorf("update legal entity: %w", err)
+		}
 	}
 
 	patch := patchToCoreCustomerProfilePatch(cmd)

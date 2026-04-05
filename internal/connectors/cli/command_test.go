@@ -411,9 +411,10 @@ func TestCommandCustomerProfileCreateWithJSON(t *testing.T) {
 					DefaultCurrency: "USD",
 				},
 			},
-			args: []string{"customer", "create", "--json", `{"legal_entity_id":"le_abc","default_currency":"USD"}`},
+			args: []string{"customer", "create", "--json", `{"type":"company","legal_name":"Acme SRL","default_currency":"USD"}`},
 			wantCreateArg: &app.CreateCustomerProfileCommand{
-				LegalEntityID:   "le_abc",
+				LegalEntityType: "company",
+				LegalName:       "Acme SRL",
 				DefaultCurrency: "USD",
 			},
 			wantContain: "cus_123",
@@ -463,8 +464,11 @@ func TestCommandCustomerProfileCreateWithJSON(t *testing.T) {
 				if tc.service.createArg == nil {
 					t.Fatal("Create() was not called")
 				}
-				if tc.service.createArg.LegalEntityID != tc.wantCreateArg.LegalEntityID {
-					t.Errorf("Create() legal_entity_id = %q, want %q", tc.service.createArg.LegalEntityID, tc.wantCreateArg.LegalEntityID)
+				if tc.service.createArg.LegalEntityType != tc.wantCreateArg.LegalEntityType {
+					t.Errorf("Create() type = %q, want %q", tc.service.createArg.LegalEntityType, tc.wantCreateArg.LegalEntityType)
+				}
+				if tc.service.createArg.LegalName != tc.wantCreateArg.LegalName {
+					t.Errorf("Create() legal_name = %q, want %q", tc.service.createArg.LegalName, tc.wantCreateArg.LegalName)
 				}
 				if tc.service.createArg.DefaultCurrency != tc.wantCreateArg.DefaultCurrency {
 					t.Errorf("Create() default_currency = %q, want %q", tc.service.createArg.DefaultCurrency, tc.wantCreateArg.DefaultCurrency)
@@ -496,12 +500,12 @@ func TestCommandCustomerProfileCreateWithFormatFlag(t *testing.T) {
 	}{
 		{
 			name:        "text format default",
-			args:        []string{"customer", "create", "--json", `{"legal_entity_id":"le_abc","default_currency":"USD"}`},
+			args:        []string{"customer", "create", "--json", `{"type":"company","legal_name":"Acme SRL","default_currency":"USD"}`},
 			wantContain: "cus_123",
 		},
 		{
 			name:        "json format",
-			args:        []string{"customer", "create", "--json", `{"legal_entity_id":"le_abc","default_currency":"USD"}`, "--format", "json"},
+			args:        []string{"customer", "create", "--json", `{"type":"company","legal_name":"Acme SRL","default_currency":"USD"}`, "--format", "json"},
 			wantContain: `"id":"cus_123"`,
 		},
 	}

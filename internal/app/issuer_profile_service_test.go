@@ -72,68 +72,69 @@ func (s *legalEntityStoreStubForIssuer) Delete(ctx context.Context, id string) e
 func TestIssuerProfileService_Create(t *testing.T) {
 	t.Parallel()
 
-	now := time.Date(2026, 4, 4, 12, 0, 0, 0, time.UTC)
-
 	tests := []struct {
-		name              string
-		cmd               CreateIssuerProfileCommand
-		legalEntityStore  *legalEntityStoreStubForIssuer
-		issuerStore       *issuerProfileStoreStub
-		wantErr           string
-		wantSaved         bool
-		savedFields       core.IssuerProfile
-		wantLegalEntityID string
+		name             string
+		cmd              CreateIssuerProfileCommand
+		legalEntityStore *legalEntityStoreStubForIssuer
+		issuerStore      *issuerProfileStoreStub
+		wantErr          string
+		wantSaved        bool
+		savedFields      core.IssuerProfile
 	}{
 		{
-			name: "creates issuer profile with valid legal entity",
+			name: "creates issuer profile with valid inline legal entity",
 			cmd: CreateIssuerProfileCommand{
-				LegalEntityID:   "le_123",
+				LegalEntityType: "company",
+				LegalName:       "Acme SRL",
 				DefaultCurrency: "USD",
 				DefaultNotes:    "Payment terms: Net 30",
 			},
-			legalEntityStore: &legalEntityStoreStubForIssuer{
-				getByIDRes: &core.LegalEntity{
-					ID:        "le_123",
-					Type:      core.EntityTypeCompany,
-					LegalName: "Acme SRL",
-					CreatedAt: now,
-					UpdatedAt: now,
-				},
-			},
-			issuerStore: &issuerProfileStoreStub{},
-			wantSaved:   true,
+			legalEntityStore: &legalEntityStoreStubForIssuer{},
+			issuerStore:      &issuerProfileStoreStub{},
+			wantSaved:        true,
 			savedFields: core.IssuerProfile{
-				LegalEntityID:   "le_123",
 				DefaultCurrency: "USD",
 				DefaultNotes:    "Payment terms: Net 30",
 			},
-			wantLegalEntityID: "le_123",
 		},
 		{
-			name: "rejects non-existent legal entity",
+			name: "propagates legal entity creation error",
 			cmd: CreateIssuerProfileCommand{
-				LegalEntityID:   "le_nonexistent",
+				LegalEntityType: "company",
+				LegalName:       "Acme SRL",
 				DefaultCurrency: "USD",
 			},
 			legalEntityStore: &legalEntityStoreStubForIssuer{
-				getByIDErr: ErrLegalEntityNotFound,
+				saveErr: errors.New("store failure"),
 			},
 			issuerStore: &issuerProfileStoreStub{},
-			wantErr:     "legal entity not found",
+			wantErr:     "store failure",
 		},
 		{
-			name: "rejects missing legal entity id",
+			name: "rejects missing legal entity type",
 			cmd: CreateIssuerProfileCommand{
+				LegalName:       "Acme SRL",
 				DefaultCurrency: "USD",
 			},
 			legalEntityStore: &legalEntityStoreStubForIssuer{},
 			issuerStore:      &issuerProfileStoreStub{},
-			wantErr:          "legal entity id is required",
+			wantErr:          "invalid entity type",
+		},
+		{
+			name: "rejects missing legal name",
+			cmd: CreateIssuerProfileCommand{
+				LegalEntityType: "company",
+				DefaultCurrency: "USD",
+			},
+			legalEntityStore: &legalEntityStoreStubForIssuer{},
+			issuerStore:      &issuerProfileStoreStub{},
+			wantErr:          "legal name is required",
 		},
 		{
 			name: "rejects missing default currency",
 			cmd: CreateIssuerProfileCommand{
-				LegalEntityID: "le_123",
+				LegalEntityType: "company",
+				LegalName:       "Acme SRL",
 			},
 			legalEntityStore: &legalEntityStoreStubForIssuer{},
 			issuerStore:      &issuerProfileStoreStub{},
@@ -171,8 +172,11 @@ func TestIssuerProfileService_Create(t *testing.T) {
 			}
 
 			if tc.wantSaved {
-				if tc.issuerStore.saveArg.LegalEntityID != tc.savedFields.LegalEntityID {
-					t.Errorf("saved LegalEntityID = %v, want %v", tc.issuerStore.saveArg.LegalEntityID, tc.savedFields.LegalEntityID)
+				if tc.legalEntityStore.saveArg == nil {
+					t.Fatal("legal entity store.Save not called")
+				}
+				if tc.issuerStore.saveArg.LegalEntityID == "" {
+					t.Error("saved issuer profile LegalEntityID is empty")
 				}
 				if tc.issuerStore.saveArg.DefaultCurrency != tc.savedFields.DefaultCurrency {
 					t.Errorf("saved DefaultCurrency = %v, want %v", tc.issuerStore.saveArg.DefaultCurrency, tc.savedFields.DefaultCurrency)
@@ -183,10 +187,6 @@ func TestIssuerProfileService_Create(t *testing.T) {
 				if got.ID == "" {
 					t.Error("returned issuer profile ID is empty")
 				}
-			}
-
-			if tc.wantLegalEntityID != "" && tc.legalEntityStore.getByIDArg != tc.wantLegalEntityID {
-				t.Errorf("legal entity store.GetByID called with %s, want %s", tc.legalEntityStore.getByIDArg, tc.wantLegalEntityID)
 			}
 		})
 	}
@@ -271,6 +271,130 @@ func TestIssuerProfileService_Get(t *testing.T) {
 				}
 				if got.DefaultCurrency != tc.expectedCurrency {
 					t.Errorf("got DefaultCurrency = %s, want %s", got.DefaultCurrency, tc.expectedCurrency)
+				}
+			}
+		})
+	}
+}
+
+func TestIssuerProfileService_Update_CascadeLegalEntity(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 4, 4, 12, 0, 0, 0, time.UTC)
+
+	existingLE := &core.LegalEntity{
+		ID:        "le_456",
+		Type:      core.EntityTypeCompany,
+		LegalName: "Acme SRL",
+	}
+
+	tests := []struct {
+		name            string
+		id              string
+		cmd             PatchIssuerProfileCommand
+		storeProfile    *core.IssuerProfile
+		legalEntityRes  *core.LegalEntity
+		legalEntityErr  error
+		wantErr         string
+		wantLEUpdated   bool
+		wantLEID        string
+		wantLELegalName string
+	}{
+		{
+			name: "cascades legal name update to linked legal entity",
+			id:   "iss_123",
+			cmd:  PatchIssuerProfileCommand{LegalName: ptr("Acme Corp")},
+			storeProfile: &core.IssuerProfile{
+				ID:              "iss_123",
+				LegalEntityID:   "le_456",
+				DefaultCurrency: "USD",
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			},
+			legalEntityRes:  existingLE,
+			wantLEUpdated:   true,
+			wantLEID:        "le_456",
+			wantLELegalName: "Acme Corp",
+		},
+		{
+			name: "does not call legal entity store when no LE fields provided",
+			id:   "iss_123",
+			cmd:  PatchIssuerProfileCommand{DefaultNotes: ptr("just notes")},
+			storeProfile: &core.IssuerProfile{
+				ID:              "iss_123",
+				LegalEntityID:   "le_456",
+				DefaultCurrency: "USD",
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			},
+			wantLEUpdated: false,
+		},
+		{
+			name: "propagates legal entity update error",
+			id:   "iss_123",
+			cmd:  PatchIssuerProfileCommand{LegalName: ptr("Acme Corp")},
+			storeProfile: &core.IssuerProfile{
+				ID:              "iss_123",
+				LegalEntityID:   "le_456",
+				DefaultCurrency: "USD",
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			},
+			legalEntityErr: errors.New("le store failure"),
+			wantErr:        "le store failure",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			profileStore := &issuerProfileStoreStub{
+				getByIDRes: tc.storeProfile,
+			}
+
+			var leStore *legalEntityStoreStubForIssuer
+			if tc.wantLEUpdated || tc.legalEntityErr != nil {
+				leStore = &legalEntityStoreStubForIssuer{
+					getByIDRes: tc.legalEntityRes,
+					saveErr:    tc.legalEntityErr,
+				}
+				if tc.legalEntityErr != nil {
+					leStore.getByIDRes = existingLE
+					leStore.saveErr = tc.legalEntityErr
+				}
+			}
+			svc := NewIssuerProfileService(leStore, profileStore)
+
+			_, err := svc.Update(context.Background(), tc.id, tc.cmd)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatal("Update() error = nil, want non-nil")
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Update() error = %q, want substring %q", err.Error(), tc.wantErr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Update() error = %v", err)
+			}
+
+			if tc.wantLEUpdated {
+				if leStore.getByIDArg != tc.wantLEID {
+					t.Errorf("LE GetByID called with %q, want %q", leStore.getByIDArg, tc.wantLEID)
+				}
+				if leStore.saveArg == nil {
+					t.Fatal("LE store.Save not called")
+				}
+				if tc.wantLELegalName != "" && leStore.saveArg.LegalName != tc.wantLELegalName {
+					t.Errorf("LE saved LegalName = %q, want %q", leStore.saveArg.LegalName, tc.wantLELegalName)
+				}
+			} else {
+				if leStore != nil && leStore.saveArg != nil {
+					t.Fatal("LE store.Save was unexpectedly called")
 				}
 			}
 		})

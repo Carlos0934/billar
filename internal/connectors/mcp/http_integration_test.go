@@ -8,10 +8,9 @@ func TestMCPServerOverHTTPUsesRequestAuthenticatedIdentity(t *testing.T) {
 	t.Parallel()
 
 	session := &sessionServiceStub{}
-	legalEntity := &legalEntityWriteServiceStub{}
 	issuer := &issuerProfileServiceStub{}
 	customer := &customerProfileWriteServiceStub{}
-	server := NewServer(session, legalEntity, issuer, customer, NewIngressGuard(nil), nil)
+	server := NewServer(session, issuer, customer, NewIngressGuard(nil), nil)
 
 	if server == nil {
 		t.Fatal("NewServer() returned nil")
@@ -22,10 +21,9 @@ func TestMCPServerOverHTTPAllowsUnauthenticatedDiscoveryMethods(t *testing.T) {
 	t.Parallel()
 
 	session := &sessionServiceStub{}
-	legalEntity := &legalEntityWriteServiceStub{}
 	issuer := &issuerProfileServiceStub{}
 	customer := &customerProfileWriteServiceStub{}
-	server := NewServer(session, legalEntity, issuer, customer, NewIngressGuard(nil), nil)
+	server := NewServer(session, issuer, customer, NewIngressGuard(nil), nil)
 
 	if server == nil {
 		t.Fatal("NewServer() returned nil")
@@ -36,10 +34,9 @@ func TestMCPServerOverHTTPRejectsUnauthenticatedActionMethods(t *testing.T) {
 	t.Parallel()
 
 	session := &sessionServiceStub{}
-	legalEntity := &legalEntityWriteServiceStub{}
 	issuer := &issuerProfileServiceStub{}
 	customer := &customerProfileWriteServiceStub{}
-	server := NewServer(session, legalEntity, issuer, customer, NewIngressGuard(nil), nil)
+	server := NewServer(session, issuer, customer, NewIngressGuard(nil), nil)
 
 	if server == nil {
 		t.Fatal("NewServer() returned nil")

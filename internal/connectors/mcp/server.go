@@ -15,18 +15,6 @@ type Server struct {
 	toolNames []string
 }
 
-type LegalEntityListProvider interface {
-	List(ctx context.Context, query app.ListQuery) (app.ListResult[app.LegalEntityDTO], error)
-}
-
-type LegalEntityWriteProvider interface {
-	LegalEntityListProvider
-	Create(ctx context.Context, cmd app.CreateLegalEntityCommand) (app.LegalEntityDTO, error)
-	Get(ctx context.Context, id string) (app.LegalEntityDTO, error)
-	Update(ctx context.Context, id string, cmd app.PatchLegalEntityCommand) (app.LegalEntityDTO, error)
-	Delete(ctx context.Context, id string) error
-}
-
 type IssuerProfileWriteProvider interface {
 	Create(ctx context.Context, cmd app.CreateIssuerProfileCommand) (app.IssuerProfileDTO, error)
 	Get(ctx context.Context, id string) (app.IssuerProfileDTO, error)
@@ -45,7 +33,7 @@ type CustomerProfileWriteProvider interface {
 	Delete(ctx context.Context, id string) error
 }
 
-func NewServer(sessionService app.SessionService, legalEntity LegalEntityWriteProvider, issuer IssuerProfileWriteProvider, customer CustomerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) *Server {
+func NewServer(sessionService app.SessionService, issuer IssuerProfileWriteProvider, customer CustomerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) *Server {
 	mcpServer := mcpsrv.NewMCPServer(
 		"Billar MCP Session Surface",
 		"1.0.0",
@@ -53,7 +41,7 @@ func NewServer(sessionService app.SessionService, legalEntity LegalEntityWritePr
 		mcpsrv.WithRecovery(),
 	)
 
-	toolNames := registerTools(mcpServer, sessionService, legalEntity, issuer, customer, guard, logger)
+	toolNames := registerTools(mcpServer, sessionService, issuer, customer, guard, logger)
 
 	return &Server{
 		server:    mcpServer,

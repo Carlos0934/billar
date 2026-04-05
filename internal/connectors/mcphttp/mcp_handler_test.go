@@ -23,7 +23,6 @@ func TestV1MCPRouteUsesConnectorAuthenticatedIdentity(t *testing.T) {
 	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{identity: app.AuthenticatedIdentity{Email: "person@example.com", EmailVerified: true}}, challenge, nil).Wrap(
 		mcpconnector.NewServer(
 			app.NewRequestSessionService(app.ContextIdentitySource{}),
-			legalEntityProviderStub{},
 			issuerProfileProviderStub{},
 			customerProfileProviderStub{},
 			mcpconnector.NewIngressGuard(nil),
@@ -77,7 +76,6 @@ func TestV1MCPRouteChallengesUnauthenticatedNonDiscoveryRequest(t *testing.T) {
 	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{err: app.ErrMissingBearerToken}, challenge, nil).Wrap(
 		mcpconnector.NewServer(
 			app.NewRequestSessionService(app.ContextIdentitySource{}),
-			legalEntityProviderStub{},
 			issuerProfileProviderStub{},
 			customerProfileProviderStub{},
 			mcpconnector.NewIngressGuard(nil),
@@ -111,7 +109,6 @@ func TestV1MCPRouteAllowsUnauthenticatedDiscoveryMethod(t *testing.T) {
 	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{err: app.ErrMissingBearerToken}, challenge, nil).Wrap(
 		mcpconnector.NewServer(
 			app.NewRequestSessionService(app.ContextIdentitySource{}),
-			legalEntityProviderStub{},
 			issuerProfileProviderStub{},
 			customerProfileProviderStub{},
 			mcpconnector.NewIngressGuard(nil),
@@ -143,7 +140,6 @@ func TestV1MCPRouteAllowsUnauthenticatedToolsListDiscovery(t *testing.T) {
 	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{err: app.ErrMissingBearerToken}, challenge, nil).Wrap(
 		mcpconnector.NewServer(
 			app.NewRequestSessionService(app.ContextIdentitySource{}),
-			legalEntityProviderStub{},
 			issuerProfileProviderStub{},
 			customerProfileProviderStub{},
 			mcpconnector.NewIngressGuard(nil),
@@ -178,7 +174,6 @@ func TestV1MCPRouteAllowsUnauthenticatedNotificationsInitializedDiscovery(t *tes
 	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{err: app.ErrMissingBearerToken}, challenge, nil).Wrap(
 		mcpconnector.NewServer(
 			app.NewRequestSessionService(app.ContextIdentitySource{}),
-			legalEntityProviderStub{},
 			issuerProfileProviderStub{},
 			customerProfileProviderStub{},
 			mcpconnector.NewIngressGuard(nil),
@@ -205,29 +200,7 @@ func TestV1MCPRouteAllowsUnauthenticatedNotificationsInitializedDiscovery(t *tes
 	// Other status codes are acceptable - auth allowed the request through
 }
 
-// Stub implementations for the new three-entity model
-
-type legalEntityProviderStub struct{}
-
-func (s legalEntityProviderStub) List(ctx context.Context, query app.ListQuery) (app.ListResult[app.LegalEntityDTO], error) {
-	return app.ListResult[app.LegalEntityDTO]{}, nil
-}
-
-func (s legalEntityProviderStub) Create(ctx context.Context, cmd app.CreateLegalEntityCommand) (app.LegalEntityDTO, error) {
-	return app.LegalEntityDTO{}, nil
-}
-
-func (s legalEntityProviderStub) Get(ctx context.Context, id string) (app.LegalEntityDTO, error) {
-	return app.LegalEntityDTO{}, nil
-}
-
-func (s legalEntityProviderStub) Update(ctx context.Context, id string, cmd app.PatchLegalEntityCommand) (app.LegalEntityDTO, error) {
-	return app.LegalEntityDTO{}, nil
-}
-
-func (s legalEntityProviderStub) Delete(ctx context.Context, id string) error {
-	return nil
-}
+// Stub implementations
 
 type issuerProfileProviderStub struct{}
 

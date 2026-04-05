@@ -52,6 +52,8 @@ func (s *customerProfileStoreStub) Delete(ctx context.Context, id string) error 
 }
 
 type legalEntityStoreStubForCustomer struct {
+	saveArg    *core.LegalEntity
+	saveErr    error
 	getByIDArg string
 	getByIDRes *core.LegalEntity
 	getByIDErr error
@@ -62,7 +64,9 @@ func (s *legalEntityStoreStubForCustomer) List(ctx context.Context, query ListQu
 }
 
 func (s *legalEntityStoreStubForCustomer) Save(ctx context.Context, entity *core.LegalEntity) error {
-	return nil
+	_ = ctx
+	s.saveArg = entity
+	return s.saveErr
 }
 
 func (s *legalEntityStoreStubForCustomer) GetByID(ctx context.Context, id string) (*core.LegalEntity, error) {
@@ -179,69 +183,70 @@ func TestCustomerProfileService_List(t *testing.T) {
 func TestCustomerProfileService_Create(t *testing.T) {
 	t.Parallel()
 
-	now := time.Date(2026, 4, 4, 12, 0, 0, 0, time.UTC)
-
 	tests := []struct {
-		name              string
-		cmd               CreateCustomerProfileCommand
-		legalEntityStore  *legalEntityStoreStubForCustomer
-		profileStore      *customerProfileStoreStub
-		wantErr           string
-		wantSaved         bool
-		savedFields       core.CustomerProfile
-		wantLegalEntityID string
+		name             string
+		cmd              CreateCustomerProfileCommand
+		legalEntityStore *legalEntityStoreStubForCustomer
+		profileStore     *customerProfileStoreStub
+		wantErr          string
+		wantSaved        bool
+		savedFields      core.CustomerProfile
 	}{
 		{
-			name: "creates customer profile with valid legal entity",
+			name: "creates customer profile with valid inline legal entity",
 			cmd: CreateCustomerProfileCommand{
-				LegalEntityID:   "le_123",
+				LegalEntityType: "company",
+				LegalName:       "Acme SRL",
 				DefaultCurrency: "USD",
 				Notes:           "Preferred customer",
 			},
-			legalEntityStore: &legalEntityStoreStubForCustomer{
-				getByIDRes: &core.LegalEntity{
-					ID:        "le_123",
-					Type:      core.EntityTypeCompany,
-					LegalName: "Acme SRL",
-					CreatedAt: now,
-					UpdatedAt: now,
-				},
-			},
-			profileStore: &customerProfileStoreStub{},
-			wantSaved:    true,
+			legalEntityStore: &legalEntityStoreStubForCustomer{},
+			profileStore:     &customerProfileStoreStub{},
+			wantSaved:        true,
 			savedFields: core.CustomerProfile{
-				LegalEntityID:   "le_123",
 				DefaultCurrency: "USD",
 				Notes:           "Preferred customer",
 				Status:          core.CustomerProfileStatusActive,
 			},
-			wantLegalEntityID: "le_123",
 		},
 		{
-			name: "rejects non-existent legal entity",
+			name: "propagates legal entity creation error",
 			cmd: CreateCustomerProfileCommand{
-				LegalEntityID:   "le_nonexistent",
+				LegalEntityType: "company",
+				LegalName:       "Acme SRL",
 				DefaultCurrency: "USD",
 			},
 			legalEntityStore: &legalEntityStoreStubForCustomer{
-				getByIDErr: ErrLegalEntityNotFound,
+				saveErr: errors.New("store failure"),
 			},
 			profileStore: &customerProfileStoreStub{},
-			wantErr:      "legal entity not found",
+			wantErr:      "store failure",
 		},
 		{
-			name: "rejects missing legal entity id",
+			name: "rejects missing legal entity type",
 			cmd: CreateCustomerProfileCommand{
+				LegalName:       "Acme SRL",
 				DefaultCurrency: "USD",
 			},
 			legalEntityStore: &legalEntityStoreStubForCustomer{},
 			profileStore:     &customerProfileStoreStub{},
-			wantErr:          "legal entity id is required",
+			wantErr:          "invalid entity type",
+		},
+		{
+			name: "rejects missing legal name",
+			cmd: CreateCustomerProfileCommand{
+				LegalEntityType: "company",
+				DefaultCurrency: "USD",
+			},
+			legalEntityStore: &legalEntityStoreStubForCustomer{},
+			profileStore:     &customerProfileStoreStub{},
+			wantErr:          "legal name is required",
 		},
 		{
 			name: "rejects missing default currency",
 			cmd: CreateCustomerProfileCommand{
-				LegalEntityID: "le_123",
+				LegalEntityType: "company",
+				LegalName:       "Acme SRL",
 			},
 			legalEntityStore: &legalEntityStoreStubForCustomer{},
 			profileStore:     &customerProfileStoreStub{},
@@ -279,8 +284,11 @@ func TestCustomerProfileService_Create(t *testing.T) {
 			}
 
 			if tc.wantSaved {
-				if tc.profileStore.saveArg.LegalEntityID != tc.savedFields.LegalEntityID {
-					t.Errorf("saved LegalEntityID = %v, want %v", tc.profileStore.saveArg.LegalEntityID, tc.savedFields.LegalEntityID)
+				if tc.legalEntityStore.saveArg == nil {
+					t.Fatal("legal entity store.Save not called")
+				}
+				if tc.profileStore.saveArg.LegalEntityID == "" {
+					t.Error("saved customer profile LegalEntityID is empty")
 				}
 				if tc.profileStore.saveArg.DefaultCurrency != tc.savedFields.DefaultCurrency {
 					t.Errorf("saved DefaultCurrency = %v, want %v", tc.profileStore.saveArg.DefaultCurrency, tc.savedFields.DefaultCurrency)
@@ -294,10 +302,6 @@ func TestCustomerProfileService_Create(t *testing.T) {
 				if got.ID == "" {
 					t.Error("returned customer profile ID is empty")
 				}
-			}
-
-			if tc.wantLegalEntityID != "" && tc.legalEntityStore.getByIDArg != tc.wantLegalEntityID {
-				t.Errorf("legal entity store.GetByID called with %s, want %s", tc.legalEntityStore.getByIDArg, tc.wantLegalEntityID)
 			}
 		})
 	}
@@ -533,6 +537,139 @@ func TestCustomerProfileService_Update(t *testing.T) {
 				}
 				if got.ID == "" {
 					t.Error("returned customer profile ID is empty")
+				}
+			}
+		})
+	}
+}
+
+func TestCustomerProfileService_Update_CascadeLegalEntity(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 4, 4, 12, 0, 0, 0, time.UTC)
+
+	existingLE := &core.LegalEntity{
+		ID:        "le_456",
+		Type:      core.EntityTypeCompany,
+		LegalName: "Acme SRL",
+	}
+
+	tests := []struct {
+		name            string
+		id              string
+		cmd             PatchCustomerProfileCommand
+		storeProfile    *core.CustomerProfile
+		legalEntityRes  *core.LegalEntity
+		legalEntityErr  error
+		wantErr         string
+		wantLEUpdated   bool
+		wantLEID        string
+		wantLELegalName string
+	}{
+		{
+			name: "cascades legal name update to linked legal entity",
+			id:   "cus_123",
+			cmd:  PatchCustomerProfileCommand{LegalName: ptr("Acme Corp")},
+			storeProfile: &core.CustomerProfile{
+				ID:              "cus_123",
+				LegalEntityID:   "le_456",
+				Status:          core.CustomerProfileStatusActive,
+				DefaultCurrency: "USD",
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			},
+			legalEntityRes:  existingLE,
+			wantLEUpdated:   true,
+			wantLEID:        "le_456",
+			wantLELegalName: "Acme Corp",
+		},
+		{
+			name: "does not call legal entity store when no LE fields provided",
+			id:   "cus_123",
+			cmd:  PatchCustomerProfileCommand{Notes: ptr("just notes")},
+			storeProfile: &core.CustomerProfile{
+				ID:              "cus_123",
+				LegalEntityID:   "le_456",
+				Status:          core.CustomerProfileStatusActive,
+				DefaultCurrency: "USD",
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			},
+			wantLEUpdated: false,
+		},
+		{
+			name: "propagates legal entity update error",
+			id:   "cus_123",
+			cmd:  PatchCustomerProfileCommand{LegalName: ptr("Acme Corp")},
+			storeProfile: &core.CustomerProfile{
+				ID:              "cus_123",
+				LegalEntityID:   "le_456",
+				Status:          core.CustomerProfileStatusActive,
+				DefaultCurrency: "USD",
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			},
+			legalEntityErr: errors.New("le store failure"),
+			wantErr:        "le store failure",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			profileStore := &customerProfileStoreStub{
+				getByIDRes: tc.storeProfile,
+			}
+
+			var leStore *legalEntityStoreStubForCustomer
+			if tc.wantLEUpdated || tc.legalEntityErr != nil {
+				leStore = &legalEntityStoreStubForCustomer{
+					getByIDRes: tc.legalEntityRes,
+					saveErr:    tc.legalEntityErr,
+				}
+				if tc.legalEntityRes != nil {
+					// Wire save error only (getByID returns the entity itself)
+					leStore.getByIDErr = nil
+				}
+				if tc.legalEntityErr != nil {
+					// When we want LE error, getByID must succeed first
+					leStore.getByIDRes = existingLE
+					leStore.saveErr = tc.legalEntityErr
+				}
+			}
+			// For "no LE fields" test, pass nil so any erroneous LE call would panic.
+			svc := NewCustomerProfileService(leStore, profileStore)
+
+			_, err := svc.Update(context.Background(), tc.id, tc.cmd)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatal("Update() error = nil, want non-nil")
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Update() error = %q, want substring %q", err.Error(), tc.wantErr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Update() error = %v", err)
+			}
+
+			if tc.wantLEUpdated {
+				if leStore.getByIDArg != tc.wantLEID {
+					t.Errorf("LE GetByID called with %q, want %q", leStore.getByIDArg, tc.wantLEID)
+				}
+				if leStore.saveArg == nil {
+					t.Fatal("LE store.Save not called")
+				}
+				if tc.wantLELegalName != "" && leStore.saveArg.LegalName != tc.wantLELegalName {
+					t.Errorf("LE saved LegalName = %q, want %q", leStore.saveArg.LegalName, tc.wantLELegalName)
+				}
+			} else {
+				if leStore != nil && leStore.saveArg != nil {
+					t.Fatal("LE store.Save was unexpectedly called")
 				}
 			}
 		})
