@@ -19,6 +19,51 @@ import (
 	infrasqlite "github.com/Carlos0934/billar/internal/infra/sqlite"
 )
 
+var listenAndServe = func(server *http.Server) error {
+	return server.ListenAndServe()
+}
+
+func newServer(authCfg config.AuthConfig, appCfg config.Config, authenticator mcphttpconnector.RequestAuthenticator, store *infrasqlite.Store, logger *slog.Logger) (*http.Server, error) {
+	legalEntityStore := infrasqlite.NewLegalEntityStore(store)
+	issuerProfileStore := infrasqlite.NewIssuerProfileStore(store)
+	customerProfileStore := infrasqlite.NewCustomerProfileStore(store)
+	agreementStore := infrasqlite.NewServiceAgreementStore(store)
+	timeEntryStore := infrasqlite.NewTimeEntryStore(store)
+
+	issuerProfileService := app.NewIssuerProfileService(legalEntityStore, issuerProfileStore)
+	customerProfileService := app.NewCustomerProfileService(legalEntityStore, customerProfileStore)
+	agreementService := app.NewAgreementService(agreementStore, customerProfileStore)
+	timeEntryService := app.NewTimeEntryService(timeEntryStore, customerProfileStore, agreementStore)
+
+	mcpSessionService := app.NewRequestSessionService(app.ContextIdentitySource{})
+	healthService := app.NewHealthService(appCfg.AppName)
+	mcpChallenge := app.OAuthChallengeDTO{
+		ResourceURI:          authCfg.ResourceServerURI,
+		AuthorizationServers: []string{authCfg.IssuerURL},
+	}
+	mcpServer := mcpconnector.NewServer(
+		mcpSessionService,
+		issuerProfileService,
+		customerProfileService,
+		agreementService,
+		timeEntryService,
+		mcpconnector.NewIngressGuardFromConfig(appCfg.AccessPolicy),
+		logger,
+	)
+	mcpAuthMiddleware := mcphttpconnector.NewMCPHTTPAuthMiddleware(authenticator, mcpChallenge, logger)
+
+	mux := http.NewServeMux()
+	mux.Handle("/healthz", mcphttpconnector.HealthHandler(healthService))
+	mux.Handle("/v1/mcp", mcpAuthMiddleware.Wrap(mcpServer.HTTPHandler()))
+	mux.Handle("/.well-known/oauth-protected-resource", mcphttpconnector.MetadataHandler(mcpChallenge))
+
+	return &http.Server{
+		Addr:              authCfg.ListenAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}, nil
+}
+
 func main() {
 	logger := logging.New()
 	authCfg, err := config.LoadAuthConfig()
@@ -47,40 +92,10 @@ func main() {
 		}
 	}()
 
-	legalEntityStore := infrasqlite.NewLegalEntityStore(store)
-	issuerProfileStore := infrasqlite.NewIssuerProfileStore(store)
-	customerProfileStore := infrasqlite.NewCustomerProfileStore(store)
-	agreementStore := infrasqlite.NewServiceAgreementStore(store)
-
-	issuerProfileService := app.NewIssuerProfileService(legalEntityStore, issuerProfileStore)
-	customerProfileService := app.NewCustomerProfileService(legalEntityStore, customerProfileStore)
-	agreementService := app.NewAgreementService(agreementStore, customerProfileStore)
-
-	mcpSessionService := app.NewRequestSessionService(app.ContextIdentitySource{})
-	healthService := app.NewHealthService(appCfg.AppName)
-	mcpChallenge := app.OAuthChallengeDTO{
-		ResourceURI:          authCfg.ResourceServerURI,
-		AuthorizationServers: []string{authCfg.IssuerURL},
-	}
-	mcpServer := mcpconnector.NewServer(
-		mcpSessionService,
-		issuerProfileService,
-		customerProfileService,
-		agreementService,
-		mcpconnector.NewIngressGuardFromConfig(appCfg.AccessPolicy),
-		logger,
-	)
-	mcpAuthMiddleware := mcphttpconnector.NewMCPHTTPAuthMiddleware(requestAuthService, mcpChallenge, logger)
-
-	mux := http.NewServeMux()
-	mux.Handle("/healthz", mcphttpconnector.HealthHandler(healthService))
-	mux.Handle("/v1/mcp", mcpAuthMiddleware.Wrap(mcpServer.HTTPHandler()))
-	mux.Handle("/.well-known/oauth-protected-resource", mcphttpconnector.MetadataHandler(mcpChallenge))
-
-	server := &http.Server{
-		Addr:              authCfg.ListenAddr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
+	server, err := newServer(authCfg, appCfg, requestAuthService, store, logger)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 
 	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -94,7 +109,7 @@ func main() {
 	}()
 
 	logger.Info("server listening", slog.String("server", "mcp-http"), slog.String("addr", authCfg.ListenAddr))
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := listenAndServe(server); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

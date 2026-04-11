@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"strings"
+	"time"
 
 	"github.com/Carlos0934/billar/internal/app"
 )
@@ -260,5 +261,43 @@ type ServiceAgreementUpdateRateInput struct {
 func (i ServiceAgreementUpdateRateInput) toCommand() (string, app.UpdateServiceAgreementRateCommand) {
 	return strings.TrimSpace(i.ID), app.UpdateServiceAgreementRateCommand{
 		HourlyRate: i.HourlyRate,
+	}
+}
+
+// RecordTimeEntryInput is the typed input struct for the time_entry.record tool.
+type RecordTimeEntryInput struct {
+	CustomerProfileID  string    `json:"customer_profile_id"`
+	ServiceAgreementID string    `json:"service_agreement_id"`
+	Description        string    `json:"description"`
+	Hours              int64     `json:"hours"`
+	Billable           bool      `json:"billable"`
+	Date               time.Time `json:"date"`
+}
+
+// toCommand converts the input struct to app.RecordTimeEntryCommand.
+func (i RecordTimeEntryInput) toCommand() app.RecordTimeEntryCommand {
+	return app.RecordTimeEntryCommand{
+		CustomerProfileID:  strings.TrimSpace(i.CustomerProfileID),
+		ServiceAgreementID: strings.TrimSpace(i.ServiceAgreementID),
+		Description:        strings.TrimSpace(i.Description),
+		Hours:              i.Hours,
+		Billable:           i.Billable,
+		Date:               i.Date,
+	}
+}
+
+// UpdateTimeEntryInput is the typed input struct for the time_entry.update tool.
+type UpdateTimeEntryInput struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	Hours       int64  `json:"hours"`
+}
+
+// toCommand converts the input struct to app.UpdateTimeEntryCommand.
+func (i UpdateTimeEntryInput) toCommand() app.UpdateTimeEntryCommand {
+	return app.UpdateTimeEntryCommand{
+		ID:          strings.TrimSpace(i.ID),
+		Description: strings.TrimSpace(i.Description),
+		Hours:       i.Hours,
 	}
 }

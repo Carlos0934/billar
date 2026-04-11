@@ -231,15 +231,15 @@ func TestTimeEntryService_Record_ValidNonBillableEntry(t *testing.T) {
 
 	profiles := &customerProfileStoreForTimeEntry{getByIDRes: activeProfile()}
 	entries := &timeEntryStoreStub{}
-	// No agreement store needed for non-billable
 	svc := NewTimeEntryService(entries, profiles, nil)
 
 	dto, err := svc.Record(context.Background(), RecordTimeEntryCommand{
-		CustomerProfileID: "cus_abc123",
-		Description:       "Internal meeting",
-		Hours:             10000,
-		Billable:          false,
-		Date:              time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC),
+		CustomerProfileID:  "cus_abc123",
+		ServiceAgreementID: "sa_xyz789",
+		Description:        "Internal meeting",
+		Hours:              10000,
+		Billable:           false,
+		Date:               time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC),
 	})
 
 	if err != nil {
@@ -248,8 +248,34 @@ func TestTimeEntryService_Record_ValidNonBillableEntry(t *testing.T) {
 	if dto.Billable {
 		t.Fatal("DTO Billable = true, want false")
 	}
-	if dto.ServiceAgreementID != "" {
-		t.Fatalf("DTO ServiceAgreementID = %q, want empty for non-billable", dto.ServiceAgreementID)
+	if dto.ServiceAgreementID != "sa_xyz789" {
+		t.Fatalf("DTO ServiceAgreementID = %q, want sa_xyz789", dto.ServiceAgreementID)
+	}
+}
+
+func TestTimeEntryService_Record_RejectsMissingServiceAgreement(t *testing.T) {
+	t.Parallel()
+
+	profiles := &customerProfileStoreForTimeEntry{getByIDRes: activeProfile()}
+	entries := &timeEntryStoreStub{}
+	svc := NewTimeEntryService(entries, profiles, nil)
+
+	_, err := svc.Record(context.Background(), RecordTimeEntryCommand{
+		CustomerProfileID: "cus_abc123",
+		Description:       "Internal meeting",
+		Hours:             10000,
+		Billable:          false,
+		Date:              time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC),
+	})
+
+	if err == nil {
+		t.Fatal("Record() error = nil, want error for missing service agreement")
+	}
+	if !errors.Is(err, core.ErrMissingServiceAgreement) {
+		t.Fatalf("error = %v, want wrapping core.ErrMissingServiceAgreement", err)
+	}
+	if entries.saveArg != nil {
+		t.Fatal("Save was unexpectedly called")
 	}
 }
 

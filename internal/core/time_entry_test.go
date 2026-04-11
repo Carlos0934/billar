@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func TestNewTimeEntry_ValidBillableEntry(t *testing.T) {
 	}
 }
 
-func TestNewTimeEntry_NonBillableRequiresNoAgreement(t *testing.T) {
+func TestNewTimeEntry_NonBillableRequiresServiceAgreement(t *testing.T) {
 	t.Parallel()
 
 	hours, _ := NewHours(10000)
@@ -70,12 +71,12 @@ func TestNewTimeEntry_NonBillableRequiresNoAgreement(t *testing.T) {
 		Date:              time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC),
 	}
 
-	entry, err := NewTimeEntry(params)
-	if err != nil {
-		t.Fatalf("NewTimeEntry() for non-billable error = %v, want nil", err)
+	_, err := NewTimeEntry(params)
+	if err == nil {
+		t.Fatal("NewTimeEntry() error = nil, want service agreement required")
 	}
-	if entry.ServiceAgreementID != "" {
-		t.Fatalf("ServiceAgreementID = %q, want empty for non-billable", entry.ServiceAgreementID)
+	if !errors.Is(err, ErrMissingServiceAgreement) {
+		t.Fatalf("NewTimeEntry() error = %v, want ErrMissingServiceAgreement", err)
 	}
 }
 

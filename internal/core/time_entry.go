@@ -17,7 +17,7 @@ const (
 // Sentinel errors for TimeEntry domain invariants.
 var (
 	ErrInvalidTimeEntry        = errors.New("time entry is invalid")
-	ErrMissingServiceAgreement = errors.New("service agreement is required for billable time entries")
+	ErrMissingServiceAgreement = errors.New("service agreement is required")
 	ErrTimeEntryLocked         = errors.New("time entry is locked: it has been assigned to an invoice")
 )
 
@@ -57,7 +57,7 @@ func NewTimeEntry(params TimeEntryParams) (TimeEntry, error) {
 	if !params.Hours.IsPositive() {
 		return TimeEntry{}, errors.New("time entry hours must be positive")
 	}
-	if params.Billable && strings.TrimSpace(params.ServiceAgreementID) == "" {
+	if strings.TrimSpace(params.ServiceAgreementID) == "" {
 		return TimeEntry{}, ErrMissingServiceAgreement
 	}
 

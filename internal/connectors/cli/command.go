@@ -21,18 +21,20 @@ type Command struct {
 	issuer       IssuerProfileServiceProvider
 	customer     CustomerProfileServiceProvider
 	agreement    AgreementServiceProvider
+	timeEntry    TimeEntryServiceProvider
 	colorEnabled bool
 }
 
-const commandUsage = "usage: billar <health|status|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>|agreement <create|get|list|update-rate|activate|deactivate>> [flags]"
+const commandUsage = "usage: billar <health|status|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>|agreement <create|get|list|update-rate|activate|deactivate>|time-entry <record|get|update|delete|list|list-unbilled>> [flags]"
 
-func NewCommand(health HealthStatusProvider, legalEntity LegalEntityServiceProvider, issuer IssuerProfileServiceProvider, customer CustomerProfileServiceProvider, agreement AgreementServiceProvider, colorEnabled bool) Command {
+func NewCommand(health HealthStatusProvider, legalEntity LegalEntityServiceProvider, issuer IssuerProfileServiceProvider, customer CustomerProfileServiceProvider, agreement AgreementServiceProvider, timeEntry TimeEntryServiceProvider, colorEnabled bool) Command {
 	return Command{
 		health:       health,
 		legalEntity:  legalEntity,
 		issuer:       issuer,
 		customer:     customer,
 		agreement:    agreement,
+		timeEntry:    timeEntry,
 		colorEnabled: colorEnabled,
 	}
 }
@@ -83,6 +85,9 @@ func (c Command) Run(ctx context.Context, args []string, out io.Writer) error {
 
 	case "agreement":
 		return c.runAgreement(ctx, args[1:], out)
+
+	case "time-entry":
+		return c.runTimeEntry(ctx, args[1:], out)
 
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
@@ -636,5 +641,165 @@ func (c Command) runAgreement(ctx context.Context, args []string, out io.Writer)
 
 	default:
 		return fmt.Errorf("unknown command %q", strings.Join([]string{"agreement", args[0]}, " "))
+	}
+}
+
+func (c Command) runTimeEntry(ctx context.Context, args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return errors.New(commandUsage)
+	}
+
+	subcommand := strings.ToLower(args[0])
+	if c.timeEntry == nil {
+		return errors.New("time entry service is required")
+	}
+
+	switch subcommand {
+	case "record":
+		cmd, format, err := parseTimeEntryRecordFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.timeEntry.Record(ctx, cmd)
+		if err != nil {
+			return fmt.Errorf("run time-entry record command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeTimeEntryRecordText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write time-entry record output: %w", err)
+		}
+
+		return nil
+
+	case "get":
+		id, format, err := parseTimeEntryGetFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.timeEntry.Get(ctx, id)
+		if err != nil {
+			return fmt.Errorf("run time-entry get command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeTimeEntryGetText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write time-entry get output: %w", err)
+		}
+
+		return nil
+
+	case "update":
+		id, cmd, format, err := parseTimeEntryUpdateFlags(args[1:])
+		if err != nil {
+			return err
+		}
+		_ = id
+
+		result, err := c.timeEntry.UpdateEntry(ctx, cmd)
+		if err != nil {
+			return fmt.Errorf("run time-entry update command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeTimeEntryUpdateText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write time-entry update output: %w", err)
+		}
+
+		return nil
+
+	case "delete":
+		id, format, err := parseTimeEntryDeleteFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		if err := c.timeEntry.DeleteEntry(ctx, id); err != nil {
+			return fmt.Errorf("run time-entry delete command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: map[string]string{"id": id, "status": "deleted"},
+			TextWriter: func(w io.Writer) error {
+				return writeTimeEntryDeleteText(w, id, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write time-entry delete output: %w", err)
+		}
+
+		return nil
+
+	case "list":
+		customerID, format, err := parseTimeEntryListFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		results, err := c.timeEntry.ListByCustomerProfile(ctx, customerID)
+		if err != nil {
+			return fmt.Errorf("run time-entry list command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: results,
+			TextWriter: func(w io.Writer) error {
+				return writeTimeEntryListText(w, results, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write time-entry list output: %w", err)
+		}
+
+		return nil
+
+	case "list-unbilled":
+		customerID, format, err := parseTimeEntryListFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		results, err := c.timeEntry.ListUnbilled(ctx, customerID)
+		if err != nil {
+			return fmt.Errorf("run time-entry list-unbilled command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: results,
+			TextWriter: func(w io.Writer) error {
+				return writeTimeEntryListText(w, results, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write time-entry list-unbilled output: %w", err)
+		}
+
+		return nil
+
+	default:
+		return fmt.Errorf("unknown command %q", strings.Join([]string{"time-entry", args[0]}, " "))
 	}
 }

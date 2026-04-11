@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Carlos0934/billar/internal/core"
 )
@@ -37,6 +38,10 @@ func NewTimeEntryService(entries TimeEntryStore, profiles CustomerProfileStore, 
 
 // Record validates cross-entity dependencies, constructs a new TimeEntry, and persists it.
 func (s TimeEntryService) Record(ctx context.Context, cmd RecordTimeEntryCommand) (TimeEntryDTO, error) {
+	if strings.TrimSpace(cmd.ServiceAgreementID) == "" {
+		return TimeEntryDTO{}, fmt.Errorf("record time entry: %w", core.ErrMissingServiceAgreement)
+	}
+
 	// Validate customer profile exists
 	if _, err := s.profiles.GetByID(ctx, cmd.CustomerProfileID); err != nil {
 		if errors.Is(err, ErrCustomerProfileNotFound) {
@@ -135,6 +140,19 @@ func (s TimeEntryService) ListByCustomerProfile(ctx context.Context, customerID 
 		dtos = append(dtos, timeEntryToDTO(e))
 	}
 	return dtos, nil
+}
+
+// Get fetches a single TimeEntry by ID and returns it as a DTO.
+// Returns ErrTimeEntryNotFound if no entry matches.
+func (s TimeEntryService) Get(ctx context.Context, id string) (TimeEntryDTO, error) {
+	entry, err := s.entries.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrTimeEntryNotFound) {
+			return TimeEntryDTO{}, ErrTimeEntryNotFound
+		}
+		return TimeEntryDTO{}, fmt.Errorf("get time entry: %w", err)
+	}
+	return timeEntryToDTO(*entry), nil
 }
 
 // DeleteEntry deletes a time entry by ID, provided it is not locked to an invoice.

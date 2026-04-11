@@ -1,0 +1,188 @@
+package core
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+)
+
+const (
+	InvoiceStatusDraft  InvoiceStatus = "draft"
+	InvoiceStatusIssued InvoiceStatus = "issued"
+	InvoiceStatusVoided InvoiceStatus = "voided"
+
+	invoiceIDPrefix   = "inv_"
+	invoiceIDBytes    = 16
+	invoiceIDHexChars = 32
+
+	invoiceLineIDPrefix   = "inl_"
+	invoiceLineIDBytes    = 16
+	invoiceLineIDHexChars = 32
+	minutesPerHour        = int64(10000)
+)
+
+type InvoiceStatus string
+
+func (s InvoiceStatus) IsValid() bool {
+	switch s {
+	case InvoiceStatusDraft, InvoiceStatusIssued, InvoiceStatusVoided:
+		return true
+	default:
+		return false
+	}
+}
+
+type InvoiceLine struct {
+	ID                 string
+	InvoiceID          string
+	ServiceAgreementID string
+	TimeEntryID        string
+	UnitRate           Money
+}
+
+type InvoiceLineParams struct {
+	InvoiceID          string
+	ServiceAgreementID string
+	TimeEntryID        string
+	UnitRate           Money
+}
+
+func NewInvoiceLine(params InvoiceLineParams) (InvoiceLine, error) {
+	if strings.TrimSpace(params.InvoiceID) == "" {
+		return InvoiceLine{}, errors.New("invoice line invoice id is required")
+	}
+	if strings.TrimSpace(params.ServiceAgreementID) == "" {
+		return InvoiceLine{}, errors.New("invoice line service agreement id is required")
+	}
+	if strings.TrimSpace(params.TimeEntryID) == "" {
+		return InvoiceLine{}, errors.New("invoice line time entry id is required")
+	}
+	if !params.UnitRate.IsPositive() {
+		return InvoiceLine{}, errors.New("invoice line unit rate is required")
+	}
+
+	line := InvoiceLine{
+		ID:                 generateInvoiceLineID(),
+		InvoiceID:          strings.TrimSpace(params.InvoiceID),
+		ServiceAgreementID: strings.TrimSpace(params.ServiceAgreementID),
+		TimeEntryID:        strings.TrimSpace(params.TimeEntryID),
+		UnitRate:           params.UnitRate,
+	}
+	if line.ID == "" {
+		return InvoiceLine{}, errors.New("failed to generate invoice line id")
+	}
+	return line, nil
+}
+
+func (l InvoiceLine) LineTotal(entry TimeEntry) Money {
+	return Money{Amount: l.UnitRate.Amount * int64(entry.Hours) / minutesPerHour, Currency: l.UnitRate.Currency}
+}
+
+type Invoice struct {
+	ID         string
+	CustomerID string
+	Status     InvoiceStatus
+	Currency   string
+	Lines      []InvoiceLine
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+type InvoiceParams struct {
+	CustomerID string
+	Status     InvoiceStatus
+	Currency   string
+	Lines      []InvoiceLine
+	CreatedAt  time.Time
+}
+
+func NewInvoice(params InvoiceParams) (Invoice, error) {
+	if strings.TrimSpace(params.CustomerID) == "" {
+		return Invoice{}, errors.New("invoice customer id is required")
+	}
+	if strings.TrimSpace(params.Currency) == "" {
+		return Invoice{}, errors.New("invoice currency is required")
+	}
+	if !params.Status.IsValid() {
+		return Invoice{}, errors.New("invoice status is invalid")
+	}
+	if len(params.Lines) == 0 {
+		return Invoice{}, errors.New("invoice must have at least one line")
+	}
+
+	now := time.Now().UTC()
+	inv := Invoice{
+		ID:         generateInvoiceID(),
+		CustomerID: strings.TrimSpace(params.CustomerID),
+		Status:     params.Status,
+		Currency:   strings.TrimSpace(params.Currency),
+		Lines:      make([]InvoiceLine, len(params.Lines)),
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if !params.CreatedAt.IsZero() {
+		inv.CreatedAt = params.CreatedAt.UTC()
+		inv.UpdatedAt = params.CreatedAt.UTC()
+	}
+	if inv.ID == "" {
+		return Invoice{}, errors.New("failed to generate invoice id")
+	}
+
+	seenCurrency := ""
+	for i, line := range params.Lines {
+		if line.UnitRate.Currency != inv.Currency {
+			return Invoice{}, fmt.Errorf("invoice line currency %q must match invoice currency %q", line.UnitRate.Currency, inv.Currency)
+		}
+		if seenCurrency == "" {
+			seenCurrency = line.UnitRate.Currency
+		}
+		if line.UnitRate.Currency != seenCurrency {
+			return Invoice{}, errors.New("invoice lines must share the same currency")
+		}
+		line.InvoiceID = inv.ID
+		inv.Lines[i] = line
+	}
+
+	return inv, nil
+}
+
+func (i Invoice) IsDraft() bool { return i.Status == InvoiceStatusDraft }
+
+func (i Invoice) Total(entries []TimeEntry) Money {
+	total := Money{Currency: i.Currency}
+	entryByID := make(map[string]TimeEntry, len(entries))
+	for _, entry := range entries {
+		entryByID[entry.ID] = entry
+	}
+	for _, line := range i.Lines {
+		entry, ok := entryByID[line.TimeEntryID]
+		if !ok {
+			continue
+		}
+		total.Amount += line.LineTotal(entry).Amount
+	}
+	return total
+}
+
+func generateInvoiceID() string {
+	return generatePrefixedID(invoiceIDPrefix, invoiceIDBytes, invoiceIDHexChars)
+}
+
+func generateInvoiceLineID() string {
+	return generatePrefixedID(invoiceLineIDPrefix, invoiceLineIDBytes, invoiceLineIDHexChars)
+}
+
+func generatePrefixedID(prefix string, size int, expectedHexChars int) string {
+	buf := make([]byte, size)
+	if _, err := rand.Read(buf); err != nil {
+		return ""
+	}
+	encoded := hex.EncodeToString(buf)
+	if len(encoded) != expectedHexChars {
+		return ""
+	}
+	return prefix + encoded
+}

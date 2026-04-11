@@ -67,3 +67,21 @@ CREATE TABLE IF NOT EXISTS service_agreements (
 
 CREATE INDEX IF NOT EXISTS idx_service_agreements_customer_profile_id ON service_agreements(customer_profile_id);
 CREATE INDEX IF NOT EXISTS idx_service_agreements_created_at ON service_agreements(created_at);
+
+-- Time entries record units of work performed for a customer under a service agreement.
+-- customer_profile_id is NOT stored here; it is always derived via JOIN on service_agreements.
+CREATE TABLE IF NOT EXISTS time_entries (
+    id TEXT PRIMARY KEY,
+    service_agreement_id TEXT NOT NULL,
+    description TEXT NOT NULL,
+    hours INTEGER NOT NULL,
+    billable INTEGER NOT NULL DEFAULT 1,
+    invoice_id TEXT,
+    date INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (service_agreement_id) REFERENCES service_agreements(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_time_entries_service_agreement_id ON time_entries(service_agreement_id);
+CREATE INDEX IF NOT EXISTS idx_time_entries_date ON time_entries(date);

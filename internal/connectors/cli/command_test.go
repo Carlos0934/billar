@@ -199,7 +199,7 @@ func TestCommandRunWritesHealthOutput(t *testing.T) {
 			var out bytes.Buffer
 			cmd := NewCommand(stubHealthService{
 				status: app.HealthDTO{Name: "billar", Status: "ok"},
-			}, nil, nil, nil, nil, false)
+			}, nil, nil, nil, nil, nil, false)
 
 			if err := cmd.Run(context.Background(), tc.args, &out); err != nil {
 				t.Fatalf("Run() error = %v", err)
@@ -264,7 +264,7 @@ func TestCommandRunWritesCustomerProfileListOutput(t *testing.T) {
 
 			customerService := &stubCustomerProfileWriteService{stubCustomerProfileListService: stubCustomerProfileListService{result: baseResult}}
 			var out bytes.Buffer
-			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, customerService, nil, false)
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, customerService, nil, nil, false)
 
 			if err := cmd.Run(context.Background(), tc.args, &out); err != nil {
 				t.Fatalf("Run() error = %v", err)
@@ -376,7 +376,7 @@ func TestCommandRunRejectsInvalidInput(t *testing.T) {
 				issuerService = &stubIssuerProfileWriteService{}
 			}
 
-			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, legalEntityService, issuerService, customerService, nil, false)
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, legalEntityService, issuerService, customerService, nil, nil, false)
 			err := cmd.Run(context.Background(), tc.args, &bytes.Buffer{})
 			if err == nil {
 				t.Fatal("Run() error = nil, want non-nil")
@@ -443,7 +443,7 @@ func TestCommandCustomerProfileCreateWithJSON(t *testing.T) {
 			t.Parallel()
 
 			var out bytes.Buffer
-			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, tc.service, nil, false)
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, tc.service, nil, nil, false)
 			err := cmd.Run(context.Background(), tc.args, &out)
 
 			if tc.wantErr {
@@ -516,7 +516,7 @@ func TestCommandCustomerProfileCreateWithFormatFlag(t *testing.T) {
 			t.Parallel()
 
 			var out bytes.Buffer
-			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, service, nil, false)
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, service, nil, nil, false)
 			if err := cmd.Run(context.Background(), tc.args, &out); err != nil {
 				t.Fatalf("Run() error = %v", err)
 			}
@@ -589,7 +589,7 @@ func TestCommandCustomerProfileUpdateWithJSON(t *testing.T) {
 			t.Parallel()
 
 			var out bytes.Buffer
-			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, tc.service, nil, false)
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, tc.service, nil, nil, false)
 			err := cmd.Run(context.Background(), tc.args, &out)
 
 			if tc.wantErr {
@@ -666,7 +666,7 @@ func TestCommandCustomerProfileDelete(t *testing.T) {
 			t.Parallel()
 
 			var out bytes.Buffer
-			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, tc.service, nil, false)
+			cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, tc.service, nil, nil, false)
 			err := cmd.Run(context.Background(), tc.args, &out)
 
 			if tc.wantErr {

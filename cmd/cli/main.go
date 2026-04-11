@@ -11,6 +11,24 @@ import (
 	infrasqlite "github.com/Carlos0934/billar/internal/infra/sqlite"
 )
 
+func newCommand(cfg config.Config, store *infrasqlite.Store) connectorcli.Command {
+	legalEntityStore := infrasqlite.NewLegalEntityStore(store)
+	issuerProfileStore := infrasqlite.NewIssuerProfileStore(store)
+	customerProfileStore := infrasqlite.NewCustomerProfileStore(store)
+	agreementStore := infrasqlite.NewServiceAgreementStore(store)
+	timeEntryStore := infrasqlite.NewTimeEntryStore(store)
+
+	return connectorcli.NewCommand(
+		app.NewHealthService(cfg.AppName),
+		app.NewLegalEntityService(legalEntityStore),
+		app.NewIssuerProfileService(legalEntityStore, issuerProfileStore),
+		app.NewCustomerProfileService(legalEntityStore, customerProfileStore),
+		app.NewAgreementService(agreementStore, customerProfileStore),
+		app.NewTimeEntryService(timeEntryStore, customerProfileStore, agreementStore),
+		cfg.ColorEnabled,
+	)
+}
+
 func main() {
 	ctx := context.Background()
 	cfg := config.Load()
@@ -25,24 +43,7 @@ func main() {
 		}
 	}()
 
-	legalEntityStore := infrasqlite.NewLegalEntityStore(store)
-	issuerProfileStore := infrasqlite.NewIssuerProfileStore(store)
-	customerProfileStore := infrasqlite.NewCustomerProfileStore(store)
-	agreementStore := infrasqlite.NewServiceAgreementStore(store)
-
-	legalEntityService := app.NewLegalEntityService(legalEntityStore)
-	issuerProfileService := app.NewIssuerProfileService(legalEntityStore, issuerProfileStore)
-	customerProfileService := app.NewCustomerProfileService(legalEntityStore, customerProfileStore)
-	agreementService := app.NewAgreementService(agreementStore, customerProfileStore)
-
-	cmd := connectorcli.NewCommand(
-		app.NewHealthService(cfg.AppName),
-		legalEntityService,
-		issuerProfileService,
-		customerProfileService,
-		agreementService,
-		cfg.ColorEnabled,
-	)
+	cmd := newCommand(cfg, store)
 
 	if err := cmd.Run(ctx, os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)

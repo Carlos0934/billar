@@ -84,6 +84,12 @@ func TestMCPServerOverStdio(t *testing.T) {
 		"service_agreement.list_by_customer_profile",
 		"service_agreement.update_rate",
 		"session.status",
+		"time_entry.delete",
+		"time_entry.get",
+		"time_entry.list_by_customer_profile",
+		"time_entry.list_unbilled",
+		"time_entry.record",
+		"time_entry.update",
 	}
 	if !reflect.DeepEqual(gotToolNames, wantToolNames) {
 		t.Fatalf("ListTools() names = %v, want %v", gotToolNames, wantToolNames)

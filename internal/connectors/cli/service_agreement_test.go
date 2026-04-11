@@ -72,7 +72,7 @@ func (s *stubAgreementService) Deactivate(ctx context.Context, id string) (app.S
 
 // newTestAgreementCommand builds a minimal Command with a health stub and the given agreement service.
 func newTestAgreementCommand(svc AgreementServiceProvider) Command {
-	return NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, nil, svc, false)
+	return NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, nil, svc, nil, false)
 }
 
 // -- agreement create --
