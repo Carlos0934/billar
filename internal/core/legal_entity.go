@@ -1,8 +1,6 @@
 package core
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,9 +11,8 @@ const (
 	EntityTypeCompany    EntityType = "company"
 	EntityTypeIndividual EntityType = "individual"
 
-	legalEntityIDPrefix   = "le_"
-	legalEntityIDBytes    = 16
-	legalEntityIDHexChars = 32
+	legalEntityIDPrefix = "le_"
+	legalEntityIDBytes  = 16
 )
 
 type EntityType string
@@ -159,15 +156,5 @@ func (e LegalEntity) ValidateDelete() error {
 }
 
 func generateLegalEntityID() string {
-	buf := make([]byte, legalEntityIDBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return ""
-	}
-
-	encoded := hex.EncodeToString(buf)
-	if len(encoded) != legalEntityIDHexChars {
-		return ""
-	}
-
-	return legalEntityIDPrefix + encoded
+	return generatePrefixedID(legalEntityIDPrefix, legalEntityIDBytes)
 }

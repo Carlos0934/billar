@@ -1,17 +1,14 @@
 package core
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"strings"
 	"time"
 )
 
 const (
-	timeEntryIDPrefix   = "te_"
-	timeEntryIDBytes    = 16
-	timeEntryIDHexChars = 32
+	timeEntryIDPrefix = "te_"
+	timeEntryIDBytes  = 16
 )
 
 // Sentinel errors for TimeEntry domain invariants.
@@ -124,13 +121,5 @@ func (t *TimeEntry) UnassignFromInvoice() {
 }
 
 func generateTimeEntryID() string {
-	buf := make([]byte, timeEntryIDBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return ""
-	}
-	encoded := hex.EncodeToString(buf)
-	if len(encoded) != timeEntryIDHexChars {
-		return ""
-	}
-	return timeEntryIDPrefix + encoded
+	return generatePrefixedID(timeEntryIDPrefix, timeEntryIDBytes)
 }

@@ -203,6 +203,50 @@ func TestInvoiceServiceDiscardDraft_FailurePaths(t *testing.T) {
 	}
 }
 
+func TestInvoiceServiceIssueDraft_FailurePaths(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		setup func(*invoiceStoreStub)
+		want  string
+	}{
+		{name: "missing invoice id", want: "invoice id is required"},
+		{name: "invoice lookup failure", setup: func(invoices *invoiceStoreStub) { invoices.getByIDErr = errors.New("get failed") }, want: "get failed"},
+		{name: "non draft invoice", setup: func(invoices *invoiceStoreStub) {
+			invoices.getByIDRes = invoiceWithSingleLine("inv_001", "te_001", core.InvoiceStatusIssued)
+		}, want: "invoice is not draft"},
+		{name: "number generator failure", setup: func(invoices *invoiceStoreStub) {
+			invoices.getByIDRes = invoiceWithSingleLine("inv_001", "te_001", core.InvoiceStatusDraft)
+		}, want: "number failed"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			invoices := &invoiceStoreStub{}
+			entries := &timeEntryStoreStub{getByIDRes: mustIssueDraftEntry("te_001", "Work", mustHours(15000))}
+			if tt.setup != nil {
+				tt.setup(invoices)
+			}
+			numbers := invoiceNumberGeneratorStub{next: "INV-2026-0001"}
+			if tt.name == "number generator failure" {
+				numbers = invoiceNumberGeneratorStub{err: errors.New("number failed")}
+			}
+			svc := NewInvoiceService(invoices, entries, nil, nil, numbers)
+			invoiceID := "inv_001"
+			if tt.name == "missing invoice id" {
+				invoiceID = ""
+			}
+			_, err := svc.IssueDraft(context.Background(), IssueInvoiceCommand{InvoiceID: invoiceID})
+			if err == nil || !errorMatches(err, tt.want) {
+				t.Fatalf("IssueDraft() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func mustHours(amount int64) core.Hours {
 	h, err := core.NewHours(amount)
 	if err != nil {
@@ -212,19 +256,12 @@ func mustHours(amount int64) core.Hours {
 }
 
 func mustTimeEntry(id, customerID, agreementID string, hours core.Hours) *core.TimeEntry {
-	entry, err := core.NewTimeEntry(core.TimeEntryParams{
-		CustomerProfileID:  customerID,
-		ServiceAgreementID: agreementID,
-		Description:        "Work",
-		Hours:              hours,
-		Billable:           true,
-		Date:               time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC),
-	})
-	if err != nil {
-		panic(err)
-	}
-	entry.ID = id
-	return &entry
+	entry := mustIssueDraftEntry(id, "Work", hours)
+	entry.CustomerProfileID = customerID
+	entry.ServiceAgreementID = agreementID
+	entry.Billable = true
+	entry.Date = time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC)
+	return entry
 }
 
 func invoiceWithSingleLine(id, timeEntryID string, status core.InvoiceStatus) *core.Invoice {

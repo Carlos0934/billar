@@ -8,16 +8,19 @@ import (
 )
 
 type InvoiceDTO struct {
-	ID         string           `json:"id" toon:"id"`
-	CustomerID string           `json:"customer_id" toon:"customer_id"`
-	Status     string           `json:"status" toon:"status"`
-	Currency   string           `json:"currency" toon:"currency"`
-	IsDraft    bool             `json:"is_draft" toon:"is_draft"`
-	Lines      []InvoiceLineDTO `json:"lines" toon:"lines"`
-	Subtotal   int64            `json:"subtotal" toon:"subtotal"`
-	GrandTotal int64            `json:"grand_total" toon:"grand_total"`
-	CreatedAt  string           `json:"created_at" toon:"created_at"`
-	UpdatedAt  string           `json:"updated_at" toon:"updated_at"`
+	ID            string           `json:"id" toon:"id"`
+	InvoiceNumber string           `json:"invoice_number" toon:"invoice_number"`
+	CustomerID    string           `json:"customer_id" toon:"customer_id"`
+	Status        string           `json:"status" toon:"status"`
+	Currency      string           `json:"currency" toon:"currency"`
+	IsDraft       bool             `json:"is_draft" toon:"is_draft"`
+	IsIssued      bool             `json:"is_issued" toon:"is_issued"`
+	Lines         []InvoiceLineDTO `json:"lines" toon:"lines"`
+	Subtotal      int64            `json:"subtotal" toon:"subtotal"`
+	GrandTotal    int64            `json:"grand_total" toon:"grand_total"`
+	IssuedAt      string           `json:"issued_at" toon:"issued_at"`
+	CreatedAt     string           `json:"created_at" toon:"created_at"`
+	UpdatedAt     string           `json:"updated_at" toon:"updated_at"`
 }
 
 type InvoiceLineDTO struct {
@@ -37,6 +40,10 @@ type CreateDraftFromUnbilledCommand struct {
 	CustomerProfileID string `json:"customer_profile_id"`
 }
 
+type IssueInvoiceCommand struct {
+	InvoiceID string `json:"invoice_id"`
+}
+
 func invoiceToDTO(inv core.Invoice, entries []core.TimeEntry) InvoiceDTO {
 	lineMap := make(map[string]core.TimeEntry, len(entries))
 	for _, entry := range entries {
@@ -44,18 +51,22 @@ func invoiceToDTO(inv core.Invoice, entries []core.TimeEntry) InvoiceDTO {
 	}
 
 	dto := InvoiceDTO{
-		ID:         inv.ID,
-		CustomerID: inv.CustomerID,
-		Status:     string(inv.Status),
-		Currency:   inv.Currency,
-		IsDraft:    inv.IsDraft(),
-		CreatedAt:  formatInvoiceTime(inv.CreatedAt),
-		UpdatedAt:  formatInvoiceTime(inv.UpdatedAt),
+		ID:            inv.ID,
+		InvoiceNumber: inv.InvoiceNumber,
+		CustomerID:    inv.CustomerID,
+		Status:        string(inv.Status),
+		Currency:      inv.Currency,
+		IsDraft:       inv.IsDraft(),
+		IsIssued:      inv.IsIssued(),
+		IssuedAt:      formatInvoiceTime(inv.IssuedAt),
+		CreatedAt:     formatInvoiceTime(inv.CreatedAt),
+		UpdatedAt:     formatInvoiceTime(inv.UpdatedAt),
 	}
 	for _, line := range inv.Lines {
 		entry := lineMap[line.TimeEntryID]
-		dto.Lines = append(dto.Lines, invoiceLineToDTO(line, entry))
-		dto.Subtotal += invoiceLineToDTO(line, entry).LineTotalAmount
+		lineDTO := invoiceLineToDTO(line, entry)
+		dto.Lines = append(dto.Lines, lineDTO)
+		dto.Subtotal += lineDTO.LineTotalAmount
 	}
 	dto.GrandTotal = dto.Subtotal
 	return dto

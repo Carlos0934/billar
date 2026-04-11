@@ -96,12 +96,9 @@ func (s CustomerProfileService) Get(ctx context.Context, id string) (CustomerPro
 		return CustomerProfileDTO{}, errors.New("customer profile store is required")
 	}
 
-	profile, err := s.profiles.GetByID(ctx, id)
+	profile, err := s.getCustomerProfile(ctx, id)
 	if err != nil {
-		if errors.Is(err, ErrCustomerProfileNotFound) {
-			return CustomerProfileDTO{}, ErrCustomerProfileNotFound
-		}
-		return CustomerProfileDTO{}, fmt.Errorf("get customer profile: %w", err)
+		return CustomerProfileDTO{}, err
 	}
 
 	return customerProfileToDTO(*profile), nil
@@ -112,12 +109,9 @@ func (s CustomerProfileService) Update(ctx context.Context, id string, cmd Patch
 		return CustomerProfileDTO{}, errors.New("customer profile store is required")
 	}
 
-	profile, err := s.profiles.GetByID(ctx, id)
+	profile, err := s.getCustomerProfile(ctx, id)
 	if err != nil {
-		if errors.Is(err, ErrCustomerProfileNotFound) {
-			return CustomerProfileDTO{}, ErrCustomerProfileNotFound
-		}
-		return CustomerProfileDTO{}, fmt.Errorf("get customer profile: %w", err)
+		return CustomerProfileDTO{}, err
 	}
 
 	// Cascade legal entity fields when present.
@@ -151,12 +145,9 @@ func (s CustomerProfileService) Delete(ctx context.Context, id string) error {
 		return errors.New("customer profile store is required")
 	}
 
-	profile, err := s.profiles.GetByID(ctx, id)
+	profile, err := s.getCustomerProfile(ctx, id)
 	if err != nil {
-		if errors.Is(err, ErrCustomerProfileNotFound) {
-			return ErrCustomerProfileNotFound
-		}
-		return fmt.Errorf("get customer profile: %w", err)
+		return err
 	}
 
 	if err := profile.ValidateDelete(); err != nil {
@@ -168,4 +159,15 @@ func (s CustomerProfileService) Delete(ctx context.Context, id string) error {
 	}
 
 	return nil
+}
+
+func (s CustomerProfileService) getCustomerProfile(ctx context.Context, id string) (*core.CustomerProfile, error) {
+	profile, err := s.profiles.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrCustomerProfileNotFound) {
+			return nil, ErrCustomerProfileNotFound
+		}
+		return nil, fmt.Errorf("get customer profile: %w", err)
+	}
+	return profile, nil
 }

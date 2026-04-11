@@ -156,6 +156,82 @@ func TestNewInvoice(t *testing.T) {
 	}
 }
 
+func TestInvoiceIssue_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	rate, err := NewMoney(10000, "USD")
+	if err != nil {
+		t.Fatalf("NewMoney(): %v", err)
+	}
+	hours, err := NewHours(15000)
+	if err != nil {
+		t.Fatalf("NewHours(): %v", err)
+	}
+	entry := TimeEntry{ID: "te_123", Hours: hours}
+	line, err := NewInvoiceLine(InvoiceLineParams{InvoiceID: "inv_seed", ServiceAgreementID: "sa_123", TimeEntryID: entry.ID, UnitRate: rate})
+	if err != nil {
+		t.Fatalf("NewInvoiceLine(): %v", err)
+	}
+	invoice, err := NewInvoice(InvoiceParams{CustomerID: "cus_123", Status: InvoiceStatusDraft, Currency: "USD", Lines: []InvoiceLine{line}})
+	if err != nil {
+		t.Fatalf("NewInvoice(): %v", err)
+	}
+
+	issuedAt := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	if err := invoice.Issue("INV-2026-0001", issuedAt); err != nil {
+		t.Fatalf("Issue() error = %v", err)
+	}
+	if invoice.Status != InvoiceStatusIssued {
+		t.Fatalf("Status = %q, want issued", invoice.Status)
+	}
+	if invoice.InvoiceNumber != "INV-2026-0001" {
+		t.Fatalf("InvoiceNumber = %q, want INV-2026-0001", invoice.InvoiceNumber)
+	}
+	if !invoice.IssuedAt.Equal(issuedAt) {
+		t.Fatalf("IssuedAt = %s, want %s", invoice.IssuedAt, issuedAt)
+	}
+	if !invoice.UpdatedAt.Equal(issuedAt) {
+		t.Fatalf("UpdatedAt = %s, want %s", invoice.UpdatedAt, issuedAt)
+	}
+
+	if err := invoice.Issue("INV-2026-0002", issuedAt.Add(time.Hour)); err == nil {
+		t.Fatal("Issue() error = nil, want reissue rejected")
+	}
+}
+
+func TestInvoiceIssue_RejectsNonDraft(t *testing.T) {
+	t.Parallel()
+
+	invoice := Invoice{Status: InvoiceStatusIssued}
+	if err := invoice.Issue("INV-1", time.Now().UTC()); err == nil {
+		t.Fatal("Issue() error = nil, want non-draft rejected")
+	}
+}
+
+func TestInvoiceIssue_RejectsInvalidInputs(t *testing.T) {
+	t.Parallel()
+
+	invoice := Invoice{Status: InvoiceStatusDraft}
+	if err := invoice.Issue("", time.Now().UTC()); err == nil {
+		t.Fatal("Issue() error = nil, want blank number rejected")
+	}
+	if err := invoice.Issue("INV-1", time.Time{}); err == nil {
+		t.Fatal("Issue() error = nil, want zero issued time rejected")
+	}
+}
+
+func TestInvoiceIsIssued(t *testing.T) {
+	t.Parallel()
+
+	issued := Invoice{Status: InvoiceStatusIssued}
+	if !issued.IsIssued() {
+		t.Fatal("IsIssued() = false, want true")
+	}
+	if (Invoice{Status: InvoiceStatusDraft}).IsIssued() {
+		t.Fatal("IsIssued() = true for draft invoice")
+	}
+}
+
 func TestInvoiceNewInvoiceLineErrors(t *testing.T) {
 	t.Parallel()
 

@@ -31,11 +31,8 @@ func NewAgreementService(agreements ServiceAgreementStore, profiles CustomerProf
 
 // Create validates the customer profile exists, constructs a new agreement, and persists it.
 func (s AgreementService) Create(ctx context.Context, cmd CreateServiceAgreementCommand) (ServiceAgreementDTO, error) {
-	if _, err := s.profiles.GetByID(ctx, cmd.CustomerProfileID); err != nil {
-		if errors.Is(err, ErrCustomerProfileNotFound) {
-			return ServiceAgreementDTO{}, fmt.Errorf("create service agreement: customer profile not found: %w", err)
-		}
-		return ServiceAgreementDTO{}, fmt.Errorf("create service agreement: get customer profile: %w", err)
+	if _, err := s.getCustomerProfile(ctx, cmd.CustomerProfileID); err != nil {
+		return ServiceAgreementDTO{}, err
 	}
 
 	sa, err := core.NewServiceAgreement(core.ServiceAgreementParams{
@@ -61,24 +58,18 @@ func (s AgreementService) Create(ctx context.Context, cmd CreateServiceAgreement
 
 // Get retrieves a service agreement by ID and returns its canonical DTO.
 func (s AgreementService) Get(ctx context.Context, id string) (ServiceAgreementDTO, error) {
-	sa, err := s.agreements.GetByID(ctx, id)
+	sa, err := s.getServiceAgreement(ctx, id)
 	if err != nil {
-		if errors.Is(err, ErrServiceAgreementNotFound) {
-			return ServiceAgreementDTO{}, ErrServiceAgreementNotFound
-		}
-		return ServiceAgreementDTO{}, fmt.Errorf("get service agreement: %w", err)
+		return ServiceAgreementDTO{}, err
 	}
 	return serviceAgreementToDTO(*sa), nil
 }
 
 // UpdateRate fetches, mutates the rate, persists, and returns the updated DTO.
 func (s AgreementService) UpdateRate(ctx context.Context, id string, cmd UpdateServiceAgreementRateCommand) (ServiceAgreementDTO, error) {
-	sa, err := s.agreements.GetByID(ctx, id)
+	sa, err := s.getServiceAgreement(ctx, id)
 	if err != nil {
-		if errors.Is(err, ErrServiceAgreementNotFound) {
-			return ServiceAgreementDTO{}, ErrServiceAgreementNotFound
-		}
-		return ServiceAgreementDTO{}, fmt.Errorf("get service agreement: %w", err)
+		return ServiceAgreementDTO{}, err
 	}
 
 	if err := sa.UpdateRate(cmd.HourlyRate); err != nil {
@@ -94,12 +85,9 @@ func (s AgreementService) UpdateRate(ctx context.Context, id string, cmd UpdateS
 
 // Activate enables the agreement and persists the change.
 func (s AgreementService) Activate(ctx context.Context, id string) (ServiceAgreementDTO, error) {
-	sa, err := s.agreements.GetByID(ctx, id)
+	sa, err := s.getServiceAgreement(ctx, id)
 	if err != nil {
-		if errors.Is(err, ErrServiceAgreementNotFound) {
-			return ServiceAgreementDTO{}, ErrServiceAgreementNotFound
-		}
-		return ServiceAgreementDTO{}, fmt.Errorf("get service agreement: %w", err)
+		return ServiceAgreementDTO{}, err
 	}
 
 	sa.Activate()
@@ -113,12 +101,9 @@ func (s AgreementService) Activate(ctx context.Context, id string) (ServiceAgree
 
 // Deactivate disables the agreement and persists the change.
 func (s AgreementService) Deactivate(ctx context.Context, id string) (ServiceAgreementDTO, error) {
-	sa, err := s.agreements.GetByID(ctx, id)
+	sa, err := s.getServiceAgreement(ctx, id)
 	if err != nil {
-		if errors.Is(err, ErrServiceAgreementNotFound) {
-			return ServiceAgreementDTO{}, ErrServiceAgreementNotFound
-		}
-		return ServiceAgreementDTO{}, fmt.Errorf("get service agreement: %w", err)
+		return ServiceAgreementDTO{}, err
 	}
 
 	sa.Deactivate()
@@ -142,4 +127,26 @@ func (s AgreementService) ListByCustomerProfile(ctx context.Context, profileID s
 		dtos = append(dtos, serviceAgreementToDTO(sa))
 	}
 	return dtos, nil
+}
+
+func (s AgreementService) getServiceAgreement(ctx context.Context, id string) (*core.ServiceAgreement, error) {
+	sa, err := s.agreements.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrServiceAgreementNotFound) {
+			return nil, ErrServiceAgreementNotFound
+		}
+		return nil, fmt.Errorf("get service agreement: %w", err)
+	}
+	return sa, nil
+}
+
+func (s AgreementService) getCustomerProfile(ctx context.Context, id string) (*core.CustomerProfile, error) {
+	profile, err := s.profiles.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrCustomerProfileNotFound) {
+			return nil, fmt.Errorf("create service agreement: customer profile not found: %w", err)
+		}
+		return nil, fmt.Errorf("create service agreement: get customer profile: %w", err)
+	}
+	return profile, nil
 }

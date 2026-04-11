@@ -1,8 +1,6 @@
 package core
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,14 +12,11 @@ const (
 	InvoiceStatusIssued InvoiceStatus = "issued"
 	InvoiceStatusVoided InvoiceStatus = "voided"
 
-	invoiceIDPrefix   = "inv_"
-	invoiceIDBytes    = 16
-	invoiceIDHexChars = 32
-
-	invoiceLineIDPrefix   = "inl_"
-	invoiceLineIDBytes    = 16
-	invoiceLineIDHexChars = 32
-	minutesPerHour        = int64(10000)
+	invoiceIDPrefix     = "inv_"
+	invoiceIDBytes      = 16
+	invoiceLineIDPrefix = "inl_"
+	invoiceLineIDBytes  = 16
+	minutesPerHour      = int64(10000)
 )
 
 type InvoiceStatus string
@@ -82,13 +77,15 @@ func (l InvoiceLine) LineTotal(entry TimeEntry) Money {
 }
 
 type Invoice struct {
-	ID         string
-	CustomerID string
-	Status     InvoiceStatus
-	Currency   string
-	Lines      []InvoiceLine
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID            string
+	InvoiceNumber string
+	CustomerID    string
+	Status        InvoiceStatus
+	Currency      string
+	Lines         []InvoiceLine
+	IssuedAt      time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type InvoiceParams struct {
@@ -115,13 +112,15 @@ func NewInvoice(params InvoiceParams) (Invoice, error) {
 
 	now := time.Now().UTC()
 	inv := Invoice{
-		ID:         generateInvoiceID(),
-		CustomerID: strings.TrimSpace(params.CustomerID),
-		Status:     params.Status,
-		Currency:   strings.TrimSpace(params.Currency),
-		Lines:      make([]InvoiceLine, len(params.Lines)),
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:            generateInvoiceID(),
+		InvoiceNumber: "",
+		CustomerID:    strings.TrimSpace(params.CustomerID),
+		Status:        params.Status,
+		Currency:      strings.TrimSpace(params.Currency),
+		Lines:         make([]InvoiceLine, len(params.Lines)),
+		IssuedAt:      time.Time{},
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 	if !params.CreatedAt.IsZero() {
 		inv.CreatedAt = params.CreatedAt.UTC()
@@ -151,6 +150,29 @@ func NewInvoice(params InvoiceParams) (Invoice, error) {
 
 func (i Invoice) IsDraft() bool { return i.Status == InvoiceStatusDraft }
 
+func (i Invoice) IsIssued() bool { return i.Status == InvoiceStatusIssued }
+
+func (i *Invoice) Issue(number string, issuedAt time.Time) error {
+	if i == nil {
+		return errors.New("invoice is required")
+	}
+	if strings.TrimSpace(number) == "" {
+		return errors.New("invoice number is required")
+	}
+	if issuedAt.IsZero() {
+		return errors.New("invoice issued at is required")
+	}
+	if !i.IsDraft() {
+		return errors.New("invoice is not draft")
+	}
+
+	i.InvoiceNumber = strings.TrimSpace(number)
+	i.Status = InvoiceStatusIssued
+	i.IssuedAt = issuedAt.UTC()
+	i.UpdatedAt = issuedAt.UTC()
+	return nil
+}
+
 func (i Invoice) Total(entries []TimeEntry) Money {
 	total := Money{Currency: i.Currency}
 	entryByID := make(map[string]TimeEntry, len(entries))
@@ -168,21 +190,9 @@ func (i Invoice) Total(entries []TimeEntry) Money {
 }
 
 func generateInvoiceID() string {
-	return generatePrefixedID(invoiceIDPrefix, invoiceIDBytes, invoiceIDHexChars)
+	return generatePrefixedID(invoiceIDPrefix, invoiceIDBytes)
 }
 
 func generateInvoiceLineID() string {
-	return generatePrefixedID(invoiceLineIDPrefix, invoiceLineIDBytes, invoiceLineIDHexChars)
-}
-
-func generatePrefixedID(prefix string, size int, expectedHexChars int) string {
-	buf := make([]byte, size)
-	if _, err := rand.Read(buf); err != nil {
-		return ""
-	}
-	encoded := hex.EncodeToString(buf)
-	if len(encoded) != expectedHexChars {
-		return ""
-	}
-	return prefix + encoded
+	return generatePrefixedID(invoiceLineIDPrefix, invoiceLineIDBytes)
 }

@@ -1,8 +1,6 @@
 package core
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"strings"
 	"time"
@@ -11,9 +9,8 @@ import (
 const (
 	BillingModeHourly BillingMode = "hourly"
 
-	serviceAgreementIDPrefix   = "sa_"
-	serviceAgreementIDBytes    = 16
-	serviceAgreementIDHexChars = 32
+	serviceAgreementIDPrefix = "sa_"
+	serviceAgreementIDBytes  = 16
 )
 
 // BillingMode represents the billing strategy for a service agreement.
@@ -124,13 +121,5 @@ func (sa *ServiceAgreement) Deactivate() {
 }
 
 func generateServiceAgreementID() string {
-	buf := make([]byte, serviceAgreementIDBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return ""
-	}
-	encoded := hex.EncodeToString(buf)
-	if len(encoded) != serviceAgreementIDHexChars {
-		return ""
-	}
-	return serviceAgreementIDPrefix + encoded
+	return generatePrefixedID(serviceAgreementIDPrefix, serviceAgreementIDBytes)
 }

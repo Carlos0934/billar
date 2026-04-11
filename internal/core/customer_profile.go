@@ -1,8 +1,6 @@
 package core
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,9 +11,8 @@ const (
 	CustomerProfileStatusActive   CustomerProfileStatus = "active"
 	CustomerProfileStatusInactive CustomerProfileStatus = "inactive"
 
-	customerProfileIDPrefix   = "cus_"
-	customerProfileIDBytes    = 16
-	customerProfileIDHexChars = 32
+	customerProfileIDPrefix = "cus_"
+	customerProfileIDBytes  = 16
 )
 
 type CustomerProfileStatus string
@@ -120,15 +117,5 @@ func (p *CustomerProfile) CanReceiveInvoices() bool {
 }
 
 func generateCustomerProfileID() string {
-	buf := make([]byte, customerProfileIDBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return ""
-	}
-
-	encoded := hex.EncodeToString(buf)
-	if len(encoded) != customerProfileIDHexChars {
-		return ""
-	}
-
-	return customerProfileIDPrefix + encoded
+	return generatePrefixedID(customerProfileIDPrefix, customerProfileIDBytes)
 }

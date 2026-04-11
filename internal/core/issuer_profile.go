@@ -1,17 +1,14 @@
 package core
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"strings"
 	"time"
 )
 
 const (
-	issuerProfileIDPrefix   = "iss_"
-	issuerProfileIDBytes    = 16
-	issuerProfileIDHexChars = 32
+	issuerProfileIDPrefix = "iss_"
+	issuerProfileIDBytes  = 16
 )
 
 type IssuerProfile struct {
@@ -91,15 +88,5 @@ func (p IssuerProfile) ValidateDelete() error {
 }
 
 func generateIssuerProfileID() string {
-	buf := make([]byte, issuerProfileIDBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return ""
-	}
-
-	encoded := hex.EncodeToString(buf)
-	if len(encoded) != issuerProfileIDHexChars {
-		return ""
-	}
-
-	return issuerProfileIDPrefix + encoded
+	return generatePrefixedID(issuerProfileIDPrefix, issuerProfileIDBytes)
 }
