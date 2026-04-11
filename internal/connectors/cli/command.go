@@ -20,17 +20,19 @@ type Command struct {
 	legalEntity  LegalEntityServiceProvider
 	issuer       IssuerProfileServiceProvider
 	customer     CustomerProfileServiceProvider
+	agreement    AgreementServiceProvider
 	colorEnabled bool
 }
 
-const commandUsage = "usage: billar <health|status|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>> [flags]"
+const commandUsage = "usage: billar <health|status|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>|agreement <create|get|list|update-rate|activate|deactivate>> [flags]"
 
-func NewCommand(health HealthStatusProvider, legalEntity LegalEntityServiceProvider, issuer IssuerProfileServiceProvider, customer CustomerProfileServiceProvider, colorEnabled bool) Command {
+func NewCommand(health HealthStatusProvider, legalEntity LegalEntityServiceProvider, issuer IssuerProfileServiceProvider, customer CustomerProfileServiceProvider, agreement AgreementServiceProvider, colorEnabled bool) Command {
 	return Command{
 		health:       health,
 		legalEntity:  legalEntity,
 		issuer:       issuer,
 		customer:     customer,
+		agreement:    agreement,
 		colorEnabled: colorEnabled,
 	}
 }
@@ -78,6 +80,9 @@ func (c Command) Run(ctx context.Context, args []string, out io.Writer) error {
 
 	case "customer":
 		return c.runCustomer(ctx, args[1:], out)
+
+	case "agreement":
+		return c.runAgreement(ctx, args[1:], out)
 
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
@@ -472,4 +477,164 @@ func writeHealthText(out io.Writer, status app.HealthDTO, colorEnabled bool) err
 	view.Title("Billar Health").Divider("─────────────").Status("Status", status.Status)
 	_, err := io.WriteString(out, view.Build())
 	return err
+}
+
+func (c Command) runAgreement(ctx context.Context, args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return errors.New(commandUsage)
+	}
+
+	subcommand := strings.ToLower(args[0])
+	if c.agreement == nil {
+		return errors.New("agreement service is required")
+	}
+
+	switch subcommand {
+	case "create":
+		cmd, format, err := parseAgreementCreateFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.agreement.Create(ctx, cmd)
+		if err != nil {
+			return fmt.Errorf("run agreement create command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeAgreementCreateText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write agreement create output: %w", err)
+		}
+
+		return nil
+
+	case "get":
+		id, format, err := parseAgreementGetFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.agreement.Get(ctx, id)
+		if err != nil {
+			return fmt.Errorf("run agreement get command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeAgreementGetText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write agreement get output: %w", err)
+		}
+
+		return nil
+
+	case "list":
+		customerID, format, err := parseAgreementListFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		results, err := c.agreement.ListByCustomerProfile(ctx, customerID)
+		if err != nil {
+			return fmt.Errorf("run agreement list command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: results,
+			TextWriter: func(w io.Writer) error {
+				return writeAgreementListText(w, results, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write agreement list output: %w", err)
+		}
+
+		return nil
+
+	case "update-rate":
+		id, cmd, format, err := parseAgreementUpdateRateFlags(args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.agreement.UpdateRate(ctx, id, cmd)
+		if err != nil {
+			return fmt.Errorf("run agreement update-rate command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeAgreementUpdateRateText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write agreement update-rate output: %w", err)
+		}
+
+		return nil
+
+	case "activate":
+		id, format, err := parseAgreementIDFlags("agreement activate", args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.agreement.Activate(ctx, id)
+		if err != nil {
+			return fmt.Errorf("run agreement activate command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeAgreementActivateText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write agreement activate output: %w", err)
+		}
+
+		return nil
+
+	case "deactivate":
+		id, format, err := parseAgreementIDFlags("agreement deactivate", args[1:])
+		if err != nil {
+			return err
+		}
+
+		result, err := c.agreement.Deactivate(ctx, id)
+		if err != nil {
+			return fmt.Errorf("run agreement deactivate command: %w", err)
+		}
+
+		output := OutputResult{
+			Payload: result,
+			TextWriter: func(w io.Writer) error {
+				return writeAgreementDeactivateText(w, result, c.colorEnabled)
+			},
+		}
+
+		if err := WriteOutput(out, format, output); err != nil {
+			return fmt.Errorf("write agreement deactivate output: %w", err)
+		}
+
+		return nil
+
+	default:
+		return fmt.Errorf("unknown command %q", strings.Join([]string{"agreement", args[0]}, " "))
+	}
 }

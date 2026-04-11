@@ -140,27 +140,12 @@ OPTIONAL FIELDS:
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		cmd := app.CreateCustomerProfileCommand{
-			LegalEntityType: strings.TrimSpace(req.GetString("type", "")),
-			LegalName:       strings.TrimSpace(req.GetString("legal_name", "")),
-			TradeName:       strings.TrimSpace(req.GetString("trade_name", "")),
-			TaxID:           strings.TrimSpace(req.GetString("tax_id", "")),
-			Email:           strings.TrimSpace(req.GetString("email", "")),
-			Phone:           strings.TrimSpace(req.GetString("phone", "")),
-			Website:         strings.TrimSpace(req.GetString("website", "")),
-			DefaultCurrency: strings.TrimSpace(req.GetString("default_currency", "")),
-			Notes:           strings.TrimSpace(req.GetString("notes", "")),
+		var input CustomerProfileCreateInput
+		if err := req.BindArguments(&input); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		// Extract billing address if provided
-		args := req.GetArguments()
-		if addr, ok := args["billing_address"]; ok && addr != nil {
-			if addrMap, ok := addr.(map[string]any); ok {
-				cmd.BillingAddress = extractAddressDTO(addrMap)
-			}
-		}
-
-		result, err := service.Create(ctx, cmd)
+		result, err := service.Create(ctx, input.toCommand())
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -264,50 +249,14 @@ are cascaded to the linked legal entity when provided.`),
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		id := strings.TrimSpace(req.GetString("id", ""))
+		var input CustomerProfileUpdateInput
+		if err := req.BindArguments(&input); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		id, cmd := input.toCommand()
 		if id == "" {
 			return mcp.NewToolResultError("id argument is required"), nil
-		}
-
-		var cmd app.PatchCustomerProfileCommand
-
-		args := req.GetArguments()
-		if _, provided := args["status"]; provided {
-			cmd.Status = ptrTo(strings.TrimSpace(req.GetString("status", "")))
-		}
-		if _, provided := args["default_currency"]; provided {
-			cmd.DefaultCurrency = ptrTo(strings.TrimSpace(req.GetString("default_currency", "")))
-		}
-		if _, provided := args["notes"]; provided {
-			cmd.Notes = ptrTo(strings.TrimSpace(req.GetString("notes", "")))
-		}
-		// Legal entity fields — cascaded to the linked entity.
-		if _, provided := args["type"]; provided {
-			cmd.LegalEntityType = ptrTo(strings.TrimSpace(req.GetString("type", "")))
-		}
-		if _, provided := args["legal_name"]; provided {
-			cmd.LegalName = ptrTo(strings.TrimSpace(req.GetString("legal_name", "")))
-		}
-		if _, provided := args["trade_name"]; provided {
-			cmd.TradeName = ptrTo(strings.TrimSpace(req.GetString("trade_name", "")))
-		}
-		if _, provided := args["tax_id"]; provided {
-			cmd.TaxID = ptrTo(strings.TrimSpace(req.GetString("tax_id", "")))
-		}
-		if _, provided := args["email"]; provided {
-			cmd.Email = ptrTo(strings.TrimSpace(req.GetString("email", "")))
-		}
-		if _, provided := args["phone"]; provided {
-			cmd.Phone = ptrTo(strings.TrimSpace(req.GetString("phone", "")))
-		}
-		if _, provided := args["website"]; provided {
-			cmd.Website = ptrTo(strings.TrimSpace(req.GetString("website", "")))
-		}
-		if addr, ok := args["billing_address"]; ok && addr != nil {
-			if addrMap, ok := addr.(map[string]any); ok {
-				addrDTO := extractAddressDTO(addrMap)
-				cmd.BillingAddress = &addrDTO
-			}
 		}
 
 		result, err := service.Update(ctx, id, cmd)

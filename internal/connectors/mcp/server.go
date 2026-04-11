@@ -34,7 +34,7 @@ type CustomerProfileWriteProvider interface {
 	Delete(ctx context.Context, id string) error
 }
 
-func NewServer(sessionService app.SessionService, issuer IssuerProfileWriteProvider, customer CustomerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) *Server {
+func NewServer(sessionService app.SessionService, issuer IssuerProfileWriteProvider, customer CustomerProfileWriteProvider, agreement AgreementServiceProvider, guard IngressGuard, logger *slog.Logger) *Server {
 	mcpServer := mcpsrv.NewMCPServer(
 		"Billar MCP Session Surface",
 		"1.0.0",
@@ -42,7 +42,7 @@ func NewServer(sessionService app.SessionService, issuer IssuerProfileWriteProvi
 		mcpsrv.WithRecovery(),
 	)
 
-	toolNames := registerTools(mcpServer, sessionService, issuer, customer, guard, logger)
+	toolNames := registerTools(mcpServer, sessionService, issuer, customer, agreement, guard, logger)
 
 	return &Server{
 		server:    mcpServer,

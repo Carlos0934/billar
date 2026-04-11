@@ -316,6 +316,156 @@ func TestCustomerProfileUpdateToolHandlers(t *testing.T) {
 	}
 }
 
+// TestCustomerProfileCreateToolHandlers_BillingAddress verifies that billing_address
+// is deserialized from the JSON arguments into the correct app.AddressDTO on the command.
+func TestCustomerProfileCreateToolHandlers_BillingAddress(t *testing.T) {
+	t.Parallel()
+
+	svc := &customerProfileWriteServiceStub{
+		createRes: app.CustomerProfileDTO{
+			ID:            "cus_addr_01",
+			LegalEntityID: "le_001",
+			Status:        "active",
+		},
+	}
+
+	_, handler := customerProfileCreateTool(svc, NewIngressGuard(nil), nil)
+	result, err := handler(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "customer_profile.create",
+			Arguments: map[string]any{
+				"type":             "company",
+				"legal_name":       "Addr Corp",
+				"default_currency": "USD",
+				"billing_address": map[string]any{
+					"street":      "5 King Rd",
+					"city":        "Kingston",
+					"state":       "KN",
+					"postal_code": "00001",
+					"country":     "JM",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("handler result = %+v, want success", result)
+	}
+	if svc.createArg == nil {
+		t.Fatal("Create() was not called")
+	}
+	if svc.createArg.BillingAddress.Street != "5 King Rd" {
+		t.Errorf("BillingAddress.Street = %q, want %q", svc.createArg.BillingAddress.Street, "5 King Rd")
+	}
+	if svc.createArg.BillingAddress.City != "Kingston" {
+		t.Errorf("BillingAddress.City = %q, want %q", svc.createArg.BillingAddress.City, "Kingston")
+	}
+	if svc.createArg.BillingAddress.Country != "JM" {
+		t.Errorf("BillingAddress.Country = %q, want %q", svc.createArg.BillingAddress.Country, "JM")
+	}
+}
+
+// TestCustomerProfileUpdateToolHandlers_PatchPointerSemantics verifies absent vs.
+// explicitly-cleared field distinction in the update handler.
+func TestCustomerProfileUpdateToolHandlers_PatchPointerSemantics(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name               string
+		arguments          map[string]any
+		wantEmailNil       bool
+		wantEmailValue     string
+		wantAddressNil     bool
+		wantAddressCountry string
+	}{
+		{
+			name: "absent optional field is nil pointer in PatchCommand",
+			arguments: map[string]any{
+				"id":               "cus_123",
+				"default_currency": "USD",
+				// email absent
+			},
+			wantEmailNil:   true,
+			wantAddressNil: true,
+		},
+		{
+			name: "explicitly cleared field is non-nil pointer to empty string",
+			arguments: map[string]any{
+				"id":    "cus_123",
+				"email": "",
+			},
+			wantEmailNil:   false,
+			wantEmailValue: "",
+			wantAddressNil: true,
+		},
+		{
+			name: "billing_address provided binds nested struct",
+			arguments: map[string]any{
+				"id": "cus_123",
+				"billing_address": map[string]any{
+					"country": "DO",
+					"city":    "Santiago",
+				},
+			},
+			wantEmailNil:       true,
+			wantAddressNil:     false,
+			wantAddressCountry: "DO",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			svc := &customerProfileWriteServiceStub{
+				updateRes: app.CustomerProfileDTO{ID: "cus_123", LegalEntityID: "le_456", Status: "active"},
+			}
+			_, handler := customerProfileUpdateTool(svc, NewIngressGuard(nil), nil)
+			result, err := handler(context.Background(), mcp.CallToolRequest{
+				Params: mcp.CallToolParams{Name: "customer_profile.update", Arguments: tc.arguments},
+			})
+			if err != nil {
+				t.Fatalf("handler error = %v", err)
+			}
+			if result == nil || result.IsError {
+				t.Fatalf("handler result = %+v, want success", result)
+			}
+			if svc.updateArg == nil {
+				t.Fatal("Update() was not called")
+			}
+
+			// Email pointer semantics.
+			if tc.wantEmailNil && svc.updateArg.Email != nil {
+				t.Errorf("Email = %v, want nil (absent field)", svc.updateArg.Email)
+			}
+			if !tc.wantEmailNil {
+				if svc.updateArg.Email == nil {
+					t.Fatal("Email = nil, want non-nil pointer (field explicitly provided)")
+				}
+				if *svc.updateArg.Email != tc.wantEmailValue {
+					t.Errorf("*Email = %q, want %q", *svc.updateArg.Email, tc.wantEmailValue)
+				}
+			}
+
+			// BillingAddress pointer semantics.
+			if tc.wantAddressNil && svc.updateArg.BillingAddress != nil {
+				t.Errorf("BillingAddress = %v, want nil (address absent)", svc.updateArg.BillingAddress)
+			}
+			if !tc.wantAddressNil {
+				if svc.updateArg.BillingAddress == nil {
+					t.Fatal("BillingAddress = nil, want non-nil (address was provided)")
+				}
+				if svc.updateArg.BillingAddress.Country != tc.wantAddressCountry {
+					t.Errorf("BillingAddress.Country = %q, want %q", svc.updateArg.BillingAddress.Country, tc.wantAddressCountry)
+				}
+			}
+		})
+	}
+}
+
 func TestCustomerProfileDeleteToolHandlers(t *testing.T) {
 	t.Parallel()
 

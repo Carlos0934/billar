@@ -248,7 +248,6 @@ Represents a billable agreement for a customer profile.
 
 * `ID`
 * `CustomerProfileID`
-* `Code`
 * `Name`
 * `Description`
 * `BillingMode`
@@ -544,7 +543,10 @@ type IssuerProfileService interface {
 
 type AgreementService interface {
     Create(ctx context.Context, cmd CreateServiceAgreementCommand) (ServiceAgreementDTO, error)
-    UpdateRate(ctx context.Context, cmd UpdateServiceAgreementRateCommand) (ServiceAgreementDTO, error)
+    Get(ctx context.Context, id string) (ServiceAgreementDTO, error)
+    UpdateRate(ctx context.Context, id string, cmd UpdateServiceAgreementRateCommand) (ServiceAgreementDTO, error)
+    Activate(ctx context.Context, id string) (ServiceAgreementDTO, error)
+    Deactivate(ctx context.Context, id string) (ServiceAgreementDTO, error)
     ListByCustomerProfile(ctx context.Context, customerProfileID string) ([]ServiceAgreementDTO, error)
 }
 
@@ -601,7 +603,7 @@ type CustomerProfileStore interface {
 type ServiceAgreementStore interface {
     Save(ctx context.Context, agreement *ServiceAgreement) error
     GetByID(ctx context.Context, id string) (*ServiceAgreement, error)
-    ListByCustomerProfileID(ctx context.Context, customerProfileID string) ([]*ServiceAgreement, error)
+    ListByCustomerProfileID(ctx context.Context, customerProfileID string) ([]ServiceAgreement, error)
 }
 
 type TimeEntryStore interface {
@@ -675,7 +677,6 @@ type CreateIssuerProfileCommand struct {
 ```go
 type CreateServiceAgreementCommand struct {
     CustomerProfileID string
-    Code         string
     Name         string
     Description  string
     BillingMode  string

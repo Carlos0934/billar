@@ -25,15 +25,22 @@ func main() {
 		}
 	}()
 
-	legalEntityService := app.NewLegalEntityService(infrasqlite.NewLegalEntityStore(store))
-	issuerProfileService := app.NewIssuerProfileService(infrasqlite.NewLegalEntityStore(store), infrasqlite.NewIssuerProfileStore(store))
-	customerProfileService := app.NewCustomerProfileService(infrasqlite.NewLegalEntityStore(store), infrasqlite.NewCustomerProfileStore(store))
+	legalEntityStore := infrasqlite.NewLegalEntityStore(store)
+	issuerProfileStore := infrasqlite.NewIssuerProfileStore(store)
+	customerProfileStore := infrasqlite.NewCustomerProfileStore(store)
+	agreementStore := infrasqlite.NewServiceAgreementStore(store)
+
+	legalEntityService := app.NewLegalEntityService(legalEntityStore)
+	issuerProfileService := app.NewIssuerProfileService(legalEntityStore, issuerProfileStore)
+	customerProfileService := app.NewCustomerProfileService(legalEntityStore, customerProfileStore)
+	agreementService := app.NewAgreementService(agreementStore, customerProfileStore)
 
 	cmd := connectorcli.NewCommand(
 		app.NewHealthService(cfg.AppName),
 		legalEntityService,
 		issuerProfileService,
 		customerProfileService,
+		agreementService,
 		cfg.ColorEnabled,
 	)
 

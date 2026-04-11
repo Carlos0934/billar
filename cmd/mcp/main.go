@@ -25,8 +25,12 @@ func main() {
 		}
 	}()
 
+	customerProfileStore := infrasqlite.NewCustomerProfileStore(store)
+	agreementStore := infrasqlite.NewServiceAgreementStore(store)
+
 	issuerProfileService := app.NewIssuerProfileService(infrasqlite.NewLegalEntityStore(store), infrasqlite.NewIssuerProfileStore(store))
-	customerProfileService := app.NewCustomerProfileService(infrasqlite.NewLegalEntityStore(store), infrasqlite.NewCustomerProfileStore(store))
+	customerProfileService := app.NewCustomerProfileService(infrasqlite.NewLegalEntityStore(store), customerProfileStore)
+	agreementService := app.NewAgreementService(agreementStore, customerProfileStore)
 
 	identities, err := app.NewLocalBypassIdentitySource(os.Getenv("BILLAR_LOCAL_AUTH_EMAIL"), app.IdentityPolicy{
 		AllowedEmails:  cfg.AccessPolicy.AllowedEmails,
@@ -41,6 +45,7 @@ func main() {
 		app.NewRequestSessionService(identities),
 		issuerProfileService,
 		customerProfileService,
+		agreementService,
 		mcpconnector.NewIngressGuardFromConfig(cfg.AccessPolicy),
 		logger,
 	)

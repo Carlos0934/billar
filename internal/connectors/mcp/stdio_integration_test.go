@@ -77,6 +77,12 @@ func TestMCPServerOverStdio(t *testing.T) {
 		"issuer_profile.delete",
 		"issuer_profile.get",
 		"issuer_profile.update",
+		"service_agreement.activate",
+		"service_agreement.create",
+		"service_agreement.deactivate",
+		"service_agreement.get",
+		"service_agreement.list_by_customer_profile",
+		"service_agreement.update_rate",
 		"session.status",
 	}
 	if !reflect.DeepEqual(gotToolNames, wantToolNames) {

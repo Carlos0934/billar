@@ -50,9 +50,11 @@ func main() {
 	legalEntityStore := infrasqlite.NewLegalEntityStore(store)
 	issuerProfileStore := infrasqlite.NewIssuerProfileStore(store)
 	customerProfileStore := infrasqlite.NewCustomerProfileStore(store)
+	agreementStore := infrasqlite.NewServiceAgreementStore(store)
 
 	issuerProfileService := app.NewIssuerProfileService(legalEntityStore, issuerProfileStore)
 	customerProfileService := app.NewCustomerProfileService(legalEntityStore, customerProfileStore)
+	agreementService := app.NewAgreementService(agreementStore, customerProfileStore)
 
 	mcpSessionService := app.NewRequestSessionService(app.ContextIdentitySource{})
 	healthService := app.NewHealthService(appCfg.AppName)
@@ -64,6 +66,7 @@ func main() {
 		mcpSessionService,
 		issuerProfileService,
 		customerProfileService,
+		agreementService,
 		mcpconnector.NewIngressGuardFromConfig(appCfg.AccessPolicy),
 		logger,
 	)
