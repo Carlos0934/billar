@@ -21,7 +21,7 @@ type InvoiceStore interface {
 }
 
 type InvoiceNumberGenerator interface {
-	Next(ctx context.Context, customerID string) (string, error)
+	Next(ctx context.Context) (string, error)
 }
 
 type InvoiceService struct {
@@ -191,7 +191,7 @@ func (s InvoiceService) IssueDraft(ctx context.Context, cmd IssueInvoiceCommand)
 		lockedEntries = append(lockedEntries, *entry)
 	}
 
-	number, err := s.numbers.Next(ctx, invoice.CustomerID)
+	number, err := s.numbers.Next(ctx)
 	if err != nil {
 		return InvoiceDTO{}, fmt.Errorf("issue invoice draft: next invoice number: %w", err)
 	}

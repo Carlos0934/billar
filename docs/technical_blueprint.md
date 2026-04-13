@@ -970,7 +970,7 @@ Do not add yet:
 
 ## 19. Remaining Decisions To Freeze
 
-1. invoice number format
+1. ~~invoice number format~~ → **Frozen**: `INV-YYYY-NNNN`, global yearly sequence persisted in `invoice_sequences` table, assigned only at issue time.
 2. session timeout policy or manual logout-only
 3. final PDF rendering library
 4. invoice grouping policy for time entries

@@ -85,3 +85,10 @@ CREATE TABLE IF NOT EXISTS time_entries (
 
 CREATE INDEX IF NOT EXISTS idx_time_entries_service_agreement_id ON time_entries(service_agreement_id);
 CREATE INDEX IF NOT EXISTS idx_time_entries_date ON time_entries(date);
+
+-- Invoice sequences track the next available number for each calendar year.
+-- The sequence is global (not per-customer) and resets automatically at year rollover.
+CREATE TABLE IF NOT EXISTS invoice_sequences (
+    year INTEGER PRIMARY KEY,
+    next_seq INTEGER NOT NULL DEFAULT 1
+);

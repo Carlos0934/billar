@@ -47,13 +47,14 @@ func (s *invoiceStoreStub) Update(ctx context.Context, invoice *core.Invoice) er
 }
 
 type invoiceNumberGeneratorStub struct {
-	next string
-	err  error
+	next      string
+	err       error
+	callCount int
 }
 
-func (s invoiceNumberGeneratorStub) Next(ctx context.Context, customerID string) (string, error) {
+func (s *invoiceNumberGeneratorStub) Next(ctx context.Context) (string, error) {
 	_ = ctx
-	_ = customerID
+	s.callCount++
 	return s.next, s.err
 }
 
@@ -229,7 +230,7 @@ func TestInvoiceServiceIssueDraft(t *testing.T) {
 
 	hours := mustHours(15000)
 	entry := mustIssueDraftEntry("te_001", "Work A", hours)
-	svc, invoices, _ := newIssueDraftService(t, invoiceWithSingleLine("inv_001", entry.ID, core.InvoiceStatusDraft), entry, invoiceNumberGeneratorStub{next: "INV-2026-0001"})
+	svc, invoices, _ := newIssueDraftService(t, invoiceWithSingleLine("inv_001", entry.ID, core.InvoiceStatusDraft), entry, &invoiceNumberGeneratorStub{next: "INV-2026-0001"})
 	dto, err := svc.IssueDraft(context.Background(), IssueInvoiceCommand{InvoiceID: "inv_001"})
 	if err != nil {
 		t.Fatalf("IssueDraft() error = %v", err)
@@ -260,7 +261,7 @@ func TestInvoiceServiceIssueDraft(t *testing.T) {
 func TestInvoiceServiceIssueDraft_Rejections(t *testing.T) {
 	t.Parallel()
 
-	svc, invoices, _ := newIssueDraftService(t, nil, nil, invoiceNumberGeneratorStub{next: "INV-2026-0001"})
+	svc, invoices, _ := newIssueDraftService(t, nil, nil, &invoiceNumberGeneratorStub{next: "INV-2026-0001"})
 
 	if _, err := svc.IssueDraft(context.Background(), IssueInvoiceCommand{}); err == nil {
 		t.Fatal("IssueDraft() error = nil, want blank invoice id rejected")
@@ -272,11 +273,29 @@ func TestInvoiceServiceIssueDraft_Rejections(t *testing.T) {
 	}
 }
 
+func TestInvoiceServiceIssueDraft_ReissueDoesNotInvokeGenerator(t *testing.T) {
+	t.Parallel()
+
+	numbers := &invoiceNumberGeneratorStub{next: "INV-2026-0001"}
+	invoice := invoiceWithSingleLine("inv_001", "te_001", core.InvoiceStatusIssued)
+	invoices := &invoiceStoreStub{getByIDRes: invoice}
+	entries := &timeEntryStoreStub{getByIDRes: mustIssueDraftEntry("te_001", "Work", mustHours(15000))}
+	svc := NewInvoiceService(invoices, entries, nil, nil, numbers)
+
+	_, err := svc.IssueDraft(context.Background(), IssueInvoiceCommand{InvoiceID: "inv_001"})
+	if err == nil {
+		t.Fatal("IssueDraft() error = nil, want already-issued rejection")
+	}
+	if numbers.callCount != 0 {
+		t.Fatalf("generator invoked %d times on re-issue, want 0", numbers.callCount)
+	}
+}
+
 func TestInvoiceServiceIssueDraft_NumberGeneratorFailure(t *testing.T) {
 	t.Parallel()
 
 	entry := mustIssueDraftEntry("te_001", "Work A", mustHours(15000))
-	svc, _, _ := newIssueDraftService(t, invoiceWithSingleLine("inv_001", entry.ID, core.InvoiceStatusDraft), entry, invoiceNumberGeneratorStub{err: errors.New("number failed")})
+	svc, _, _ := newIssueDraftService(t, invoiceWithSingleLine("inv_001", entry.ID, core.InvoiceStatusDraft), entry, &invoiceNumberGeneratorStub{err: errors.New("number failed")})
 	if _, err := svc.IssueDraft(context.Background(), IssueInvoiceCommand{InvoiceID: "inv_001"}); err == nil || !strings.Contains(err.Error(), "number failed") {
 		t.Fatalf("IssueDraft() error = %v, want number failure", err)
 	}
@@ -286,7 +305,7 @@ func TestInvoiceServiceIssueDraft_StoreUpdateFailure(t *testing.T) {
 	t.Parallel()
 
 	entry := mustIssueDraftEntry("te_001", "Work A", mustHours(15000))
-	svc, invoices, _ := newIssueDraftService(t, invoiceWithSingleLine("inv_001", entry.ID, core.InvoiceStatusDraft), entry, invoiceNumberGeneratorStub{next: "INV-2026-0001"})
+	svc, invoices, _ := newIssueDraftService(t, invoiceWithSingleLine("inv_001", entry.ID, core.InvoiceStatusDraft), entry, &invoiceNumberGeneratorStub{next: "INV-2026-0001"})
 	invoices.updateErr = errors.New("update failed")
 	_, err := svc.IssueDraft(context.Background(), IssueInvoiceCommand{InvoiceID: "inv_001"})
 	if err == nil || !strings.Contains(err.Error(), "update failed") {
@@ -302,7 +321,7 @@ func TestInvoiceServiceIssueDraft_GeneratorFailureLeavesDraftUnpersisted(t *test
 
 	entry := mustIssueDraftEntry("te_001", "Work A", mustHours(15000))
 	invoice := invoiceWithSingleLine("inv_001", entry.ID, core.InvoiceStatusDraft)
-	svc, invoices, _ := newIssueDraftService(t, invoice, entry, invoiceNumberGeneratorStub{err: errors.New("number failed")})
+	svc, invoices, _ := newIssueDraftService(t, invoice, entry, &invoiceNumberGeneratorStub{err: errors.New("number failed")})
 	_, err := svc.IssueDraft(context.Background(), IssueInvoiceCommand{InvoiceID: "inv_001"})
 	if err == nil || !strings.Contains(err.Error(), "number failed") {
 		t.Fatalf("IssueDraft() error = %v, want number failure", err)
@@ -346,7 +365,7 @@ func mustIssueDraftEntry(id, description string, hours core.Hours) *core.TimeEnt
 	return &core.TimeEntry{ID: id, Description: description, Hours: hours}
 }
 
-func newIssueDraftService(t *testing.T, invoice *core.Invoice, entry *core.TimeEntry, numbers invoiceNumberGeneratorStub) (InvoiceService, *invoiceStoreStub, *timeEntryStoreStub) {
+func newIssueDraftService(t *testing.T, invoice *core.Invoice, entry *core.TimeEntry, numbers *invoiceNumberGeneratorStub) (InvoiceService, *invoiceStoreStub, *timeEntryStoreStub) {
 	t.Helper()
 	if invoice == nil {
 		invoice = &core.Invoice{}

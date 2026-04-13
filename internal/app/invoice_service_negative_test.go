@@ -230,9 +230,9 @@ func TestInvoiceServiceIssueDraft_FailurePaths(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup(invoices)
 			}
-			numbers := invoiceNumberGeneratorStub{next: "INV-2026-0001"}
+			numbers := &invoiceNumberGeneratorStub{next: "INV-2026-0001"}
 			if tt.name == "number generator failure" {
-				numbers = invoiceNumberGeneratorStub{err: errors.New("number failed")}
+				numbers = &invoiceNumberGeneratorStub{err: errors.New("number failed")}
 			}
 			svc := NewInvoiceService(invoices, entries, nil, nil, numbers)
 			invoiceID := "inv_001"
