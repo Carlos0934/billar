@@ -308,11 +308,13 @@ Represents a financial document.
 * `IssueDate`
 * `DueDate`
 * `Currency`
-* `Status`
+* `Status` (`draft`, `issued`, `discarded`)
 * `Notes`
 * `Subtotal`
 * `GrandTotal`
 * `Lines`
+* `IssuedAt`
+* `DiscardedAt`
 * `CreatedAt`
 * `UpdatedAt`
 
@@ -338,6 +340,10 @@ Represents a financial document.
 * issued invoices are immutable
 * grand total equals subtotal in the first version
 * issued invoices preserve rate snapshots
+* discard on draft: hard-delete invoice + lines, unlock time entries (atomic transaction)
+* discard on issued: soft-delete — status transitions to "discarded", number permanently consumed, time entries remain locked
+* discarded invoices reject further discard attempts
+* invoice numbers are never reused even after soft-discard
 
 ---
 
@@ -501,7 +507,7 @@ Keep the app surface small and explicit.
 * `RemoveDraftInvoiceLine`
 * `RecalculateInvoiceTotals`
 * `IssueInvoice`
-* `VoidInvoice`
+* `DiscardInvoice` — mixed semantics: draft invoices are hard-deleted (entries unlocked); issued invoices are soft-discarded (status → discarded, number permanently consumed, entries remain locked)
 * `GetInvoice`
 * `ListInvoices`
 * `RenderInvoicePDF`
@@ -557,7 +563,8 @@ type TimeEntryService interface {
 
 type InvoiceService interface {
     CreateDraftFromUnbilled(ctx context.Context, cmd CreateDraftInvoiceFromUnbilledTimeCommand) (InvoiceDTO, error)
-    Issue(ctx context.Context, invoiceID string) (InvoiceDTO, error)
+    IssueDraft(ctx context.Context, invoiceID string) (InvoiceDTO, error)
+    Discard(ctx context.Context, invoiceID string) (DiscardResult, error)
     Get(ctx context.Context, invoiceID string) (InvoiceDTO, error)
     RenderPDF(ctx context.Context, invoiceID string) (RenderedDocumentDTO, error)
 }
@@ -613,9 +620,10 @@ type TimeEntryStore interface {
 }
 
 type InvoiceStore interface {
-    Save(ctx context.Context, invoice *Invoice) error
+    CreateDraft(ctx context.Context, invoice *Invoice, entries []*TimeEntry) error
     GetByID(ctx context.Context, id string) (*Invoice, error)
-    NextInvoiceNumber(ctx context.Context) (string, error)
+    Update(ctx context.Context, invoice *Invoice) error
+    Delete(ctx context.Context, id string) error
 }
 
 type IssuerProfileStore interface {
@@ -761,6 +769,7 @@ billar time list-unbilled --customer <customer-profile-id>
 
 billar invoice draft --customer <customer-profile-id> --from <date> --to <date>
 billar invoice issue --id <id>
+billar invoice discard --id <id>
 billar invoice show --id <id>
 billar invoice pdf --id <id>
 ```
@@ -784,11 +793,16 @@ billar invoice pdf --id <id>
 * `time_entry.create`
 * `time_entry.list_by_customer_profile`
 * `time_entry.list_unbilled`
-* `invoice.create_draft_from_unbilled`
-* `invoice.get`
-* `invoice.list`
+* `invoice.draft`
 * `invoice.issue`
-* `invoice.render_pdf`
+* `invoice.discard`
+
+**Deferred (future slices — not in current MCP surface)**:
+
+* ~~`invoice.create_draft_from_unbilled`~~ — replaced by `invoice.draft` in current slice
+* ~~`invoice.get`~~ — deferred; not yet implemented
+* ~~`invoice.list`~~ — deferred; not yet implemented
+* ~~`invoice.render_pdf`~~ — deferred; PDF rendering not yet wired
 
 **Removed tools** (legal entity is always accessed via its owning profile, never directly):
 

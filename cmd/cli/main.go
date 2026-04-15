@@ -17,6 +17,8 @@ func newCommand(cfg config.Config, store *infrasqlite.Store) connectorcli.Comman
 	customerProfileStore := infrasqlite.NewCustomerProfileStore(store)
 	agreementStore := infrasqlite.NewServiceAgreementStore(store)
 	timeEntryStore := infrasqlite.NewTimeEntryStore(store)
+	invoiceStore := infrasqlite.NewInvoiceStore(store)
+	invoiceSequenceStore := infrasqlite.NewInvoiceSequenceStore(store)
 
 	return connectorcli.NewCommand(
 		app.NewHealthService(cfg.AppName),
@@ -25,6 +27,7 @@ func newCommand(cfg config.Config, store *infrasqlite.Store) connectorcli.Comman
 		app.NewCustomerProfileService(legalEntityStore, customerProfileStore),
 		app.NewAgreementService(agreementStore, customerProfileStore),
 		app.NewTimeEntryService(timeEntryStore, customerProfileStore, agreementStore),
+		app.NewInvoiceService(invoiceStore, timeEntryStore, agreementStore, customerProfileStore, invoiceSequenceStore),
 		cfg.ColorEnabled,
 	)
 }

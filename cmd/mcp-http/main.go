@@ -29,11 +29,14 @@ func newServer(authCfg config.AuthConfig, appCfg config.Config, authenticator mc
 	customerProfileStore := infrasqlite.NewCustomerProfileStore(store)
 	agreementStore := infrasqlite.NewServiceAgreementStore(store)
 	timeEntryStore := infrasqlite.NewTimeEntryStore(store)
+	invoiceStore := infrasqlite.NewInvoiceStore(store)
+	invoiceSequenceStore := infrasqlite.NewInvoiceSequenceStore(store)
 
 	issuerProfileService := app.NewIssuerProfileService(legalEntityStore, issuerProfileStore)
 	customerProfileService := app.NewCustomerProfileService(legalEntityStore, customerProfileStore)
 	agreementService := app.NewAgreementService(agreementStore, customerProfileStore)
 	timeEntryService := app.NewTimeEntryService(timeEntryStore, customerProfileStore, agreementStore)
+	invoiceService := app.NewInvoiceService(invoiceStore, timeEntryStore, agreementStore, customerProfileStore, invoiceSequenceStore)
 
 	mcpSessionService := app.NewRequestSessionService(app.ContextIdentitySource{})
 	healthService := app.NewHealthService(appCfg.AppName)
@@ -47,6 +50,7 @@ func newServer(authCfg config.AuthConfig, appCfg config.Config, authenticator mc
 		customerProfileService,
 		agreementService,
 		timeEntryService,
+		invoiceService,
 		mcpconnector.NewIngressGuardFromConfig(appCfg.AccessPolicy),
 		logger,
 	)

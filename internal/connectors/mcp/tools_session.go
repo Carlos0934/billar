@@ -12,8 +12,8 @@ import (
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 )
 
-func registerTools(server *mcpsrv.MCPServer, sessionService app.SessionService, issuer IssuerProfileWriteProvider, customer CustomerProfileWriteProvider, agreement AgreementServiceProvider, timeEntry TimeEntryServiceProvider, guard IngressGuard, logger *slog.Logger) []string {
-	registered := make([]string, 0, 10)
+func registerTools(server *mcpsrv.MCPServer, sessionService app.SessionService, issuer IssuerProfileWriteProvider, customer CustomerProfileWriteProvider, agreement AgreementServiceProvider, timeEntry TimeEntryServiceProvider, invoice InvoiceServiceProvider, guard IngressGuard, logger *slog.Logger) []string {
+	registered := make([]string, 0, 13)
 
 	statusTool, statusHandler := sessionStatusTool(sessionService, guard, logger)
 	server.AddTool(statusTool, statusHandler)
@@ -23,6 +23,7 @@ func registerTools(server *mcpsrv.MCPServer, sessionService app.SessionService, 
 	registered = append(registered, registerCustomerProfileTools(server, customer, guard, logger)...)
 	registered = append(registered, registerServiceAgreementTools(server, agreement, guard, logger)...)
 	registered = append(registered, registerTimeEntryTools(server, timeEntry, guard, logger)...)
+	registered = append(registered, registerInvoiceTools(server, invoice, guard, logger)...)
 
 	return registered
 }

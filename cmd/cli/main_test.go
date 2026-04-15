@@ -72,6 +72,31 @@ func mustOpenCLIStore(t *testing.T) *infrasqlite.Store {
 	return store
 }
 
+func TestNewCommandWiresInvoiceService(t *testing.T) {
+	t.Parallel()
+
+	store := mustOpenCLIStore(t)
+	seedCLIWiringFixture(t, store.DB())
+	cmd := newCommand(config.Config{AppName: "billar", ColorEnabled: false}, store)
+
+	// First record a time entry via CLI so it has unbilled data.
+	var recOut bytes.Buffer
+	if err := cmd.Run(context.Background(), []string{"time-entry", "record", `--json={"customer_profile_id":"cus_cli_wiring","service_agreement_id":"sa_cli_wiring","description":"invoice wiring","hours":60,"billable":true,"date":"2026-04-10T00:00:00Z"}`, "--format", "json"}, &recOut); err != nil {
+		t.Fatalf("time-entry record Run() error = %v", err)
+	}
+
+	var out bytes.Buffer
+	// Running "invoice draft" proves the invoice service is wired —
+	// without wiring, the command would return "invoice service is required".
+	err := cmd.Run(context.Background(), []string{"invoice", "draft", "--customer-id", "cus_cli_wiring", "--format", "json"}, &out)
+	if err != nil {
+		t.Fatalf("invoice draft Run() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "cus_cli_wiring") {
+		t.Fatalf("invoice draft output = %q, want customer ID payload", out.String())
+	}
+}
+
 func seedCLIWiringFixture(t *testing.T, db *sql.DB) {
 	t.Helper()
 

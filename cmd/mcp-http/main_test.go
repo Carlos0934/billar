@@ -106,7 +106,7 @@ func TestNewServerWiresHTTPRoutesAndTimeEntryTools(t *testing.T) {
 		toolNames = append(toolNames, tool.Name)
 	}
 	tools := strings.Join(toolNames, ",")
-	for _, want := range []string{"session.status", "time_entry.record", "time_entry.list_unbilled"} {
+	for _, want := range []string{"session.status", "time_entry.record", "time_entry.list_unbilled", "invoice.draft", "invoice.issue", "invoice.discard"} {
 		if !strings.Contains(tools, want) {
 			t.Fatalf("ListTools() names = %q, want %q", tools, want)
 		}

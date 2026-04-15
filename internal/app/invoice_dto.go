@@ -15,10 +15,12 @@ type InvoiceDTO struct {
 	Currency      string           `json:"currency" toon:"currency"`
 	IsDraft       bool             `json:"is_draft" toon:"is_draft"`
 	IsIssued      bool             `json:"is_issued" toon:"is_issued"`
+	IsDiscarded   bool             `json:"is_discarded" toon:"is_discarded"`
 	Lines         []InvoiceLineDTO `json:"lines" toon:"lines"`
 	Subtotal      int64            `json:"subtotal" toon:"subtotal"`
 	GrandTotal    int64            `json:"grand_total" toon:"grand_total"`
 	IssuedAt      string           `json:"issued_at" toon:"issued_at"`
+	DiscardedAt   string           `json:"discarded_at" toon:"discarded_at"`
 	CreatedAt     string           `json:"created_at" toon:"created_at"`
 	UpdatedAt     string           `json:"updated_at" toon:"updated_at"`
 }
@@ -44,6 +46,18 @@ type IssueInvoiceCommand struct {
 	InvoiceID string `json:"invoice_id"`
 }
 
+type DiscardInvoiceCommand struct {
+	InvoiceID string `json:"invoice_id"`
+}
+
+// DiscardResult captures the outcome of a discard operation so connectors can
+// show appropriate messages (e.g. soft-discard warning for issued invoices).
+type DiscardResult struct {
+	WasSoftDiscard bool
+	InvoiceNumber  string
+	Invoice        InvoiceDTO
+}
+
 func invoiceToDTO(inv core.Invoice, entries []core.TimeEntry) InvoiceDTO {
 	lineMap := make(map[string]core.TimeEntry, len(entries))
 	for _, entry := range entries {
@@ -58,7 +72,9 @@ func invoiceToDTO(inv core.Invoice, entries []core.TimeEntry) InvoiceDTO {
 		Currency:      inv.Currency,
 		IsDraft:       inv.IsDraft(),
 		IsIssued:      inv.IsIssued(),
+		IsDiscarded:   inv.IsDiscarded(),
 		IssuedAt:      formatInvoiceTime(inv.IssuedAt),
+		DiscardedAt:   formatInvoiceTime(inv.DiscardedAt),
 		CreatedAt:     formatInvoiceTime(inv.CreatedAt),
 		UpdatedAt:     formatInvoiceTime(inv.UpdatedAt),
 	}

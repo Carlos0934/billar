@@ -92,3 +92,38 @@ CREATE TABLE IF NOT EXISTS invoice_sequences (
     year INTEGER PRIMARY KEY,
     next_seq INTEGER NOT NULL DEFAULT 1
 );
+
+-- Invoices represent billing documents issued to customers.
+-- Status lifecycle: draft → issued → discarded (soft-delete for issued).
+-- Draft invoices are hard-deleted on discard; issued invoices are soft-deleted (status=discarded).
+CREATE TABLE IF NOT EXISTS invoices (
+    id TEXT PRIMARY KEY,
+    invoice_number TEXT NOT NULL DEFAULT '',
+    customer_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    issued_at INTEGER,
+    discarded_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (customer_id) REFERENCES customer_profiles(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoices_customer_id ON invoices(customer_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
+
+-- Invoice lines are the individual line items on an invoice.
+-- Each line corresponds to a single time entry being billed.
+CREATE TABLE IF NOT EXISTS invoice_lines (
+    id TEXT PRIMARY KEY,
+    invoice_id TEXT NOT NULL,
+    service_agreement_id TEXT NOT NULL,
+    time_entry_id TEXT NOT NULL,
+    unit_rate_amount INTEGER NOT NULL,
+    unit_rate_currency TEXT NOT NULL,
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+    FOREIGN KEY (service_agreement_id) REFERENCES service_agreements(id) ON DELETE CASCADE,
+    FOREIGN KEY (time_entry_id) REFERENCES time_entries(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoice_lines_invoice_id ON invoice_lines(invoice_id);

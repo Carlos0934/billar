@@ -12,6 +12,7 @@ import (
 
 var ErrNoUnbilledEntries = errors.New("no unbilled time entries")
 var ErrCustomerProfileInactive = errors.New("customer profile is inactive")
+var ErrInvoiceNotFound = errors.New("invoice not found")
 
 type InvoiceStore interface {
 	CreateDraft(ctx context.Context, invoice *core.Invoice, entries []*core.TimeEntry) error
@@ -131,33 +132,42 @@ func (s InvoiceService) CreateDraftFromUnbilled(ctx context.Context, cmd CreateD
 }
 
 func (s InvoiceService) DiscardDraft(ctx context.Context, invoiceID string) error {
+	_, err := s.Discard(ctx, invoiceID)
+	return err
+}
+
+func (s InvoiceService) Discard(ctx context.Context, invoiceID string) (DiscardResult, error) {
 	if s.invoices == nil || s.entries == nil {
-		return errors.New("invoice service dependencies are required")
+		return DiscardResult{}, errors.New("invoice service dependencies are required")
 	}
 
 	invoice, err := s.getInvoice(ctx, invoiceID)
 	if err != nil {
-		return fmt.Errorf("discard invoice draft: %w", err)
-	}
-	if !invoice.IsDraft() {
-		return errors.New("discard invoice draft: invoice is not draft")
+		return DiscardResult{}, fmt.Errorf("discard invoice: %w", err)
 	}
 
-	for _, line := range invoice.Lines {
-		entry, err := s.getTimeEntry(ctx, line.TimeEntryID)
-		if err != nil {
-			return fmt.Errorf("discard invoice draft: %w", err)
-		}
-		entry.UnassignFromInvoice()
-		if err := s.entries.Save(ctx, entry); err != nil {
-			return fmt.Errorf("discard invoice draft: save time entry: %w", err)
-		}
+	if invoice.IsDiscarded() {
+		return DiscardResult{}, errors.New("discard invoice: invoice is already discarded")
 	}
 
-	if err := s.invoices.Delete(ctx, invoiceID); err != nil {
-		return fmt.Errorf("discard invoice draft: delete invoice: %w", err)
+	if invoice.IsDraft() {
+		// Hard-delete: the store Delete handles unlocking time entries atomically
+		// with the invoice deletion in a single transaction.
+		if err := s.invoices.Delete(ctx, invoiceID); err != nil {
+			return DiscardResult{}, fmt.Errorf("discard invoice: delete invoice: %w", err)
+		}
+		return DiscardResult{WasSoftDiscard: false}, nil
 	}
-	return nil
+
+	// Issued: soft-discard via status transition.
+	invoiceNumber := invoice.InvoiceNumber
+	if err := invoice.Discard(time.Now().UTC()); err != nil {
+		return DiscardResult{}, fmt.Errorf("discard invoice: %w", err)
+	}
+	if err := s.invoices.Update(ctx, invoice); err != nil {
+		return DiscardResult{}, fmt.Errorf("discard invoice: update invoice: %w", err)
+	}
+	return DiscardResult{WasSoftDiscard: true, InvoiceNumber: invoiceNumber, Invoice: invoiceToDTO(*invoice, nil)}, nil
 }
 
 func (s InvoiceService) IssueDraft(ctx context.Context, cmd IssueInvoiceCommand) (InvoiceDTO, error) {
@@ -220,6 +230,9 @@ func derefTimeEntries(entries []*core.TimeEntry) []core.TimeEntry {
 func (s InvoiceService) getInvoice(ctx context.Context, id string) (*core.Invoice, error) {
 	invoice, err := s.invoices.GetByID(ctx, id)
 	if err != nil {
+		if errors.Is(err, ErrInvoiceNotFound) {
+			return nil, ErrInvoiceNotFound
+		}
 		return nil, fmt.Errorf("get invoice: %w", err)
 	}
 	return invoice, nil

@@ -22,12 +22,13 @@ type Command struct {
 	customer     CustomerProfileServiceProvider
 	agreement    AgreementServiceProvider
 	timeEntry    TimeEntryServiceProvider
+	invoice      InvoiceServiceProvider
 	colorEnabled bool
 }
 
-const commandUsage = "usage: billar <health|status|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>|agreement <create|get|list|update-rate|activate|deactivate>|time-entry <record|get|update|delete|list|list-unbilled>> [flags]"
+const commandUsage = "usage: billar <health|status|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>|agreement <create|get|list|update-rate|activate|deactivate>|time-entry <record|get|update|delete|list|list-unbilled>|invoice <draft|issue|discard>> [flags]"
 
-func NewCommand(health HealthStatusProvider, legalEntity LegalEntityServiceProvider, issuer IssuerProfileServiceProvider, customer CustomerProfileServiceProvider, agreement AgreementServiceProvider, timeEntry TimeEntryServiceProvider, colorEnabled bool) Command {
+func NewCommand(health HealthStatusProvider, legalEntity LegalEntityServiceProvider, issuer IssuerProfileServiceProvider, customer CustomerProfileServiceProvider, agreement AgreementServiceProvider, timeEntry TimeEntryServiceProvider, invoice InvoiceServiceProvider, colorEnabled bool) Command {
 	return Command{
 		health:       health,
 		legalEntity:  legalEntity,
@@ -35,6 +36,7 @@ func NewCommand(health HealthStatusProvider, legalEntity LegalEntityServiceProvi
 		customer:     customer,
 		agreement:    agreement,
 		timeEntry:    timeEntry,
+		invoice:      invoice,
 		colorEnabled: colorEnabled,
 	}
 }
@@ -88,6 +90,9 @@ func (c Command) Run(ctx context.Context, args []string, out io.Writer) error {
 
 	case "time-entry":
 		return c.runTimeEntry(ctx, args[1:], out)
+
+	case "invoice":
+		return c.runInvoice(ctx, args[1:], out)
 
 	default:
 		return fmt.Errorf("unknown command %q", args[0])

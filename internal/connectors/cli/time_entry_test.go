@@ -69,7 +69,7 @@ func (s *stubTimeEntryService) ListUnbilled(ctx context.Context, customerID stri
 
 // newTestTimeEntryCommand builds a minimal Command with health stub and the given time entry service.
 func newTestTimeEntryCommand(svc TimeEntryServiceProvider) Command {
-	return NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, nil, nil, svc, false)
+	return NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, nil, nil, svc, nil, false)
 }
 
 // -- time-entry record --

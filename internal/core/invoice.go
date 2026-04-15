@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	InvoiceStatusDraft  InvoiceStatus = "draft"
-	InvoiceStatusIssued InvoiceStatus = "issued"
-	InvoiceStatusVoided InvoiceStatus = "voided"
+	InvoiceStatusDraft     InvoiceStatus = "draft"
+	InvoiceStatusIssued    InvoiceStatus = "issued"
+	InvoiceStatusDiscarded InvoiceStatus = "discarded"
 
 	invoiceIDPrefix     = "inv_"
 	invoiceIDBytes      = 16
@@ -23,7 +23,7 @@ type InvoiceStatus string
 
 func (s InvoiceStatus) IsValid() bool {
 	switch s {
-	case InvoiceStatusDraft, InvoiceStatusIssued, InvoiceStatusVoided:
+	case InvoiceStatusDraft, InvoiceStatusIssued, InvoiceStatusDiscarded:
 		return true
 	default:
 		return false
@@ -84,6 +84,7 @@ type Invoice struct {
 	Currency      string
 	Lines         []InvoiceLine
 	IssuedAt      time.Time
+	DiscardedAt   time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -151,6 +152,27 @@ func NewInvoice(params InvoiceParams) (Invoice, error) {
 func (i Invoice) IsDraft() bool { return i.Status == InvoiceStatusDraft }
 
 func (i Invoice) IsIssued() bool { return i.Status == InvoiceStatusIssued }
+
+func (i Invoice) IsDiscarded() bool { return i.Status == InvoiceStatusDiscarded }
+
+func (i *Invoice) Discard(now time.Time) error {
+	if i == nil {
+		return errors.New("invoice is required")
+	}
+	if i.IsDraft() {
+		return errors.New("draft invoices must be hard-deleted")
+	}
+	if i.IsDiscarded() {
+		return errors.New("invoice is already discarded")
+	}
+	if now.IsZero() {
+		return errors.New("discard timestamp is required")
+	}
+	i.Status = InvoiceStatusDiscarded
+	i.DiscardedAt = now.UTC()
+	i.UpdatedAt = now.UTC()
+	return nil
+}
 
 func (i *Invoice) Issue(number string, issuedAt time.Time) error {
 	if i == nil {

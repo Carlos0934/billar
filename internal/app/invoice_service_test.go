@@ -178,10 +178,8 @@ func TestInvoiceServiceCreateDraftFromUnbilled_DependencyAndStoreFailures(t *tes
 func TestInvoiceServiceDiscardDraft(t *testing.T) {
 	t.Parallel()
 
-	hours1, _ := core.NewHours(15000)
-	hours2, _ := core.NewHours(30000)
-	entry1, _ := core.NewTimeEntry(core.TimeEntryParams{CustomerProfileID: "cus_abc123", ServiceAgreementID: "sa_xyz789", Description: "Work A", Hours: hours1, Billable: true, Date: time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC)})
-	entry2, _ := core.NewTimeEntry(core.TimeEntryParams{CustomerProfileID: "cus_abc123", ServiceAgreementID: "sa_xyz789", Description: "Work B", Hours: hours2, Billable: true, Date: time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC)})
+	entry1, _ := core.NewTimeEntry(core.TimeEntryParams{CustomerProfileID: "cus_abc123", ServiceAgreementID: "sa_xyz789", Description: "Work A", Hours: mustHours(15000), Billable: true, Date: time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC)})
+	entry2, _ := core.NewTimeEntry(core.TimeEntryParams{CustomerProfileID: "cus_abc123", ServiceAgreementID: "sa_xyz789", Description: "Work B", Hours: mustHours(30000), Billable: true, Date: time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC)})
 	_ = entry1.AssignToInvoice("inv_001")
 	_ = entry2.AssignToInvoice("inv_001")
 	rate, _ := core.NewMoney(10000, "USD")
@@ -189,11 +187,7 @@ func TestInvoiceServiceDiscardDraft(t *testing.T) {
 	line2, _ := core.NewInvoiceLine(core.InvoiceLineParams{InvoiceID: "inv_seed", ServiceAgreementID: "sa_xyz789", TimeEntryID: entry2.ID, UnitRate: rate})
 	invoice, _ := core.NewInvoice(core.InvoiceParams{CustomerID: "cus_abc123", Status: core.InvoiceStatusDraft, Currency: "USD", Lines: []core.InvoiceLine{line1, line2}})
 	invoices := &invoiceStoreStub{getByIDRes: &invoice}
-	entries := &timeEntryStoreStub{getByIDRes: &entry1}
-	svc := NewInvoiceService(invoices, entries, agreementsForInvoice(), profilesForInvoice())
-
-	// Override stores with deterministic behavior for both entry fetches.
-	svc.entries = &multiEntryStoreStub{timeEntryStoreStub: timeEntryStoreStub{getByIDRes: &entry1}, second: &entry2, secondID: entry2.ID}
+	svc := NewInvoiceService(invoices, &timeEntryStoreStub{}, agreementsForInvoice(), profilesForInvoice())
 
 	if err := svc.DiscardDraft(context.Background(), invoice.ID); err != nil {
 		t.Fatalf("DiscardDraft() error = %v", err)
@@ -201,15 +195,10 @@ func TestInvoiceServiceDiscardDraft(t *testing.T) {
 	if invoices.deleteID != invoice.ID {
 		t.Fatalf("Delete called with %q, want %q", invoices.deleteID, invoice.ID)
 	}
-	if err := entry1.Update("updated", hours1); err != nil {
-		t.Fatalf("entry1 should be unlocked after discard: %v", err)
-	}
-	if err := entry2.Update("updated", hours2); err != nil {
-		t.Fatalf("entry2 should be unlocked after discard: %v", err)
-	}
+	// Entry unlocking is handled atomically by the store layer (integration-tested).
 }
 
-func TestInvoiceServiceDiscardDraft_RejectsIssuedInvoice(t *testing.T) {
+func TestInvoiceServiceDiscardDraft_SoftDiscardsIssuedInvoice(t *testing.T) {
 	t.Parallel()
 
 	hours, _ := core.NewHours(15000)
@@ -220,8 +209,14 @@ func TestInvoiceServiceDiscardDraft_RejectsIssuedInvoice(t *testing.T) {
 	invoices := &invoiceStoreStub{getByIDRes: &invoice}
 	svc := NewInvoiceService(invoices, &timeEntryStoreStub{getByIDRes: &entry}, agreementsForInvoice(), profilesForInvoice())
 
-	if err := svc.DiscardDraft(context.Background(), invoice.ID); err == nil {
-		t.Fatal("DiscardDraft() error = nil, want non-draft rejection")
+	if err := svc.DiscardDraft(context.Background(), invoice.ID); err != nil {
+		t.Fatalf("DiscardDraft() error = %v, want soft-discard success", err)
+	}
+	if invoices.updateInvoice == nil {
+		t.Fatal("Update was not called for soft-discard")
+	}
+	if invoices.updateInvoice.Status != core.InvoiceStatusDiscarded {
+		t.Fatalf("updated status = %q, want discarded", invoices.updateInvoice.Status)
 	}
 }
 
@@ -331,6 +326,93 @@ func TestInvoiceServiceIssueDraft_GeneratorFailureLeavesDraftUnpersisted(t *test
 	}
 	if invoice.Status != core.InvoiceStatusDraft {
 		t.Fatalf("invoice status = %q, want draft", invoice.Status)
+	}
+}
+
+// -- Discard (unified) --
+
+func TestInvoiceServiceDiscard_DraftHardDelete(t *testing.T) {
+	t.Parallel()
+
+	entry1, _ := core.NewTimeEntry(core.TimeEntryParams{CustomerProfileID: "cus_abc123", ServiceAgreementID: "sa_xyz789", Description: "Work A", Hours: mustHours(15000), Billable: true, Date: time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC)})
+	entry2, _ := core.NewTimeEntry(core.TimeEntryParams{CustomerProfileID: "cus_abc123", ServiceAgreementID: "sa_xyz789", Description: "Work B", Hours: mustHours(30000), Billable: true, Date: time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC)})
+	_ = entry1.AssignToInvoice("inv_001")
+	_ = entry2.AssignToInvoice("inv_001")
+	rate, _ := core.NewMoney(10000, "USD")
+	line1, _ := core.NewInvoiceLine(core.InvoiceLineParams{InvoiceID: "inv_seed", ServiceAgreementID: "sa_xyz789", TimeEntryID: entry1.ID, UnitRate: rate})
+	line2, _ := core.NewInvoiceLine(core.InvoiceLineParams{InvoiceID: "inv_seed", ServiceAgreementID: "sa_xyz789", TimeEntryID: entry2.ID, UnitRate: rate})
+	invoice, _ := core.NewInvoice(core.InvoiceParams{CustomerID: "cus_abc123", Status: core.InvoiceStatusDraft, Currency: "USD", Lines: []core.InvoiceLine{line1, line2}})
+	invoices := &invoiceStoreStub{getByIDRes: &invoice}
+
+	svc := NewInvoiceService(invoices, &timeEntryStoreStub{}, agreementsForInvoice(), profilesForInvoice())
+
+	result, err := svc.Discard(context.Background(), invoice.ID)
+	if err != nil {
+		t.Fatalf("Discard() error = %v", err)
+	}
+	if result.WasSoftDiscard {
+		t.Fatal("WasSoftDiscard = true, want false for draft")
+	}
+	if invoices.deleteID != invoice.ID {
+		t.Fatalf("Delete called with %q, want %q", invoices.deleteID, invoice.ID)
+	}
+	// Entry unlocking is handled atomically by the store layer (integration-tested).
+}
+
+func TestInvoiceServiceDiscard_IssuedSoftDiscard(t *testing.T) {
+	t.Parallel()
+
+	hours, _ := core.NewHours(15000)
+	entry, _ := core.NewTimeEntry(core.TimeEntryParams{CustomerProfileID: "cus_abc123", ServiceAgreementID: "sa_xyz789", Description: "Work", Hours: hours, Billable: true, Date: time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC)})
+	_ = entry.AssignToInvoice("inv_001")
+	rate, _ := core.NewMoney(10000, "USD")
+	line, _ := core.NewInvoiceLine(core.InvoiceLineParams{InvoiceID: "inv_seed", ServiceAgreementID: "sa_xyz789", TimeEntryID: entry.ID, UnitRate: rate})
+	invoice, _ := core.NewInvoice(core.InvoiceParams{CustomerID: "cus_abc123", Status: core.InvoiceStatusIssued, Currency: "USD", Lines: []core.InvoiceLine{line}})
+	invoice.InvoiceNumber = "INV-2026-0001"
+	invoices := &invoiceStoreStub{getByIDRes: &invoice}
+
+	svc := NewInvoiceService(invoices, &timeEntryStoreStub{getByIDRes: &entry}, agreementsForInvoice(), profilesForInvoice())
+
+	result, err := svc.Discard(context.Background(), invoice.ID)
+	if err != nil {
+		t.Fatalf("Discard() error = %v", err)
+	}
+	if !result.WasSoftDiscard {
+		t.Fatal("WasSoftDiscard = false, want true for issued")
+	}
+	if result.InvoiceNumber != "INV-2026-0001" {
+		t.Fatalf("InvoiceNumber = %q, want INV-2026-0001", result.InvoiceNumber)
+	}
+	if invoices.deleteID != "" {
+		t.Fatalf("Delete called unexpectedly with %q", invoices.deleteID)
+	}
+	if invoices.updateInvoice == nil {
+		t.Fatal("Update was not called for soft-discard")
+	}
+	if invoices.updateInvoice.Status != core.InvoiceStatusDiscarded {
+		t.Fatalf("updated status = %q, want discarded", invoices.updateInvoice.Status)
+	}
+	// Entry should remain locked.
+	if err := entry.Update("should fail", hours); err == nil {
+		t.Fatal("entry should remain locked after soft-discard")
+	}
+}
+
+func TestInvoiceServiceDiscard_RejectsAlreadyDiscarded(t *testing.T) {
+	t.Parallel()
+
+	rate, _ := core.NewMoney(10000, "USD")
+	line, _ := core.NewInvoiceLine(core.InvoiceLineParams{InvoiceID: "inv_seed", ServiceAgreementID: "sa_xyz789", TimeEntryID: "te_001", UnitRate: rate})
+	invoice, _ := core.NewInvoice(core.InvoiceParams{CustomerID: "cus_abc123", Status: core.InvoiceStatusDiscarded, Currency: "USD", Lines: []core.InvoiceLine{line}})
+	invoices := &invoiceStoreStub{getByIDRes: &invoice}
+	svc := NewInvoiceService(invoices, &timeEntryStoreStub{}, agreementsForInvoice(), profilesForInvoice())
+
+	_, err := svc.Discard(context.Background(), invoice.ID)
+	if err == nil {
+		t.Fatal("Discard() error = nil, want already-discarded rejection")
+	}
+	if !strings.Contains(err.Error(), "already discarded") {
+		t.Fatalf("Discard() error = %v, want already discarded", err)
 	}
 }
 

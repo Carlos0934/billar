@@ -1,0 +1,226 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/Carlos0934/billar/internal/app"
+	"github.com/Carlos0934/billar/internal/core"
+)
+
+// InvoiceStore persists Invoice entities and their lines in SQLite.
+type InvoiceStore struct {
+	db *sql.DB
+}
+
+// NewInvoiceStore constructs an InvoiceStore from an open Store.
+func NewInvoiceStore(store *Store) *InvoiceStore {
+	if store == nil {
+		return nil
+	}
+	return &InvoiceStore{db: store.DB()}
+}
+
+// CreateDraft inserts an invoice, its lines, and links the time entries
+// to the invoice in a single transaction.
+func (s *InvoiceStore) CreateDraft(ctx context.Context, invoice *core.Invoice, entries []*core.TimeEntry) error {
+	if s == nil || s.db == nil {
+		return errors.New("invoice sqlite store is required")
+	}
+	if invoice == nil {
+		return errors.New("invoice is required")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Insert invoice.
+	_, err = tx.ExecContext(ctx, `
+INSERT INTO invoices (id, invoice_number, customer_id, status, currency, issued_at, discarded_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		invoice.ID,
+		invoice.InvoiceNumber,
+		invoice.CustomerID,
+		string(invoice.Status),
+		invoice.Currency,
+		timeToNano(invoice.IssuedAt),
+		timeToNano(invoice.DiscardedAt),
+		invoice.CreatedAt.UTC().UnixNano(),
+		invoice.UpdatedAt.UTC().UnixNano(),
+	)
+	if err != nil {
+		return fmt.Errorf("insert invoice: %w", err)
+	}
+
+	// Insert lines.
+	for _, line := range invoice.Lines {
+		_, err = tx.ExecContext(ctx, `
+INSERT INTO invoice_lines (id, invoice_id, service_agreement_id, time_entry_id, unit_rate_amount, unit_rate_currency)
+VALUES (?, ?, ?, ?, ?, ?)`,
+			line.ID,
+			invoice.ID,
+			line.ServiceAgreementID,
+			line.TimeEntryID,
+			line.UnitRate.Amount,
+			line.UnitRate.Currency,
+		)
+		if err != nil {
+			return fmt.Errorf("insert invoice line: %w", err)
+		}
+	}
+
+	// Lock time entries to this invoice.
+	for _, entry := range entries {
+		_, err = tx.ExecContext(ctx, `UPDATE time_entries SET invoice_id = ?, updated_at = ? WHERE id = ?`,
+			invoice.ID,
+			entry.UpdatedAt.UTC().UnixNano(),
+			entry.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("lock time entry %s: %w", entry.ID, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetByID fetches an invoice and its lines by ID.
+func (s *InvoiceStore) GetByID(ctx context.Context, id string) (*core.Invoice, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("invoice sqlite store is required")
+	}
+
+	var invoice core.Invoice
+	var invoiceNumber, status, currency string
+	var customerID string
+	var issuedAtNano, discardedAtNano, createdAtNano, updatedAtNano sql.NullInt64
+
+	err := s.db.QueryRowContext(ctx, `
+SELECT id, invoice_number, customer_id, status, currency, issued_at, discarded_at, created_at, updated_at
+FROM invoices WHERE id = ?`, id).Scan(
+		&invoice.ID,
+		&invoiceNumber,
+		&customerID,
+		&status,
+		&currency,
+		&issuedAtNano,
+		&discardedAtNano,
+		&createdAtNano,
+		&updatedAtNano,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, app.ErrInvoiceNotFound
+		}
+		return nil, fmt.Errorf("get invoice by id: %w", err)
+	}
+
+	invoice.InvoiceNumber = invoiceNumber
+	invoice.CustomerID = customerID
+	invoice.Status = core.InvoiceStatus(status)
+	invoice.Currency = currency
+	invoice.IssuedAt = nanoToTime(issuedAtNano)
+	invoice.DiscardedAt = nanoToTime(discardedAtNano)
+	invoice.CreatedAt = nanoToTime(createdAtNano)
+	invoice.UpdatedAt = nanoToTime(updatedAtNano)
+
+	// Fetch lines.
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, invoice_id, service_agreement_id, time_entry_id, unit_rate_amount, unit_rate_currency
+FROM invoice_lines WHERE invoice_id = ?`, id)
+	if err != nil {
+		return nil, fmt.Errorf("get invoice lines: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var line core.InvoiceLine
+		var rateAmount int64
+		var rateCurrency string
+		if err := rows.Scan(&line.ID, &line.InvoiceID, &line.ServiceAgreementID, &line.TimeEntryID, &rateAmount, &rateCurrency); err != nil {
+			return nil, fmt.Errorf("scan invoice line: %w", err)
+		}
+		line.UnitRate = core.Money{Amount: rateAmount, Currency: rateCurrency}
+		invoice.Lines = append(invoice.Lines, line)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate invoice lines: %w", err)
+	}
+
+	return &invoice, nil
+}
+
+// Update updates an invoice's status and timestamps (used for issuing and soft-discarding).
+func (s *InvoiceStore) Update(ctx context.Context, invoice *core.Invoice) error {
+	if s == nil || s.db == nil {
+		return errors.New("invoice sqlite store is required")
+	}
+	if invoice == nil {
+		return errors.New("invoice is required")
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+UPDATE invoices SET
+	invoice_number = ?, status = ?, issued_at = ?, discarded_at = ?, updated_at = ?
+WHERE id = ?`,
+		invoice.InvoiceNumber,
+		string(invoice.Status),
+		timeToNano(invoice.IssuedAt),
+		timeToNano(invoice.DiscardedAt),
+		invoice.UpdatedAt.UTC().UnixNano(),
+		invoice.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update invoice: %w", err)
+	}
+	return nil
+}
+
+// Delete hard-deletes an invoice, its lines, and unlocks associated time entries
+// in a single transaction. Either all operations succeed or none do.
+func (s *InvoiceStore) Delete(ctx context.Context, id string) error {
+	if s == nil || s.db == nil {
+		return errors.New("invoice sqlite store is required")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Unlock time entries (set invoice_id to NULL).
+	_, err = tx.ExecContext(ctx, `UPDATE time_entries SET invoice_id = NULL, updated_at = ? WHERE invoice_id = ?`,
+		time.Now().UTC().UnixNano(), id)
+	if err != nil {
+		return fmt.Errorf("unlock time entries: %w", err)
+	}
+
+	// Delete invoice (CASCADE removes invoice_lines).
+	_, err = tx.ExecContext(ctx, `DELETE FROM invoices WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete invoice: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func timeToNano(t time.Time) interface{} {
+	if t.IsZero() {
+		return nil
+	}
+	return t.UTC().UnixNano()
+}
+
+func nanoToTime(ns sql.NullInt64) time.Time {
+	if !ns.Valid {
+		return time.Time{}
+	}
+	return time.Unix(0, ns.Int64).UTC()
+}

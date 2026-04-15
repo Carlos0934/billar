@@ -129,7 +129,7 @@ func TestInvoiceServiceDiscardDraft_FailurePaths(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		setup       func(*invoiceStoreStub, *timeEntryStoreStub)
+		setup       func(*invoiceStoreStub)
 		want        string
 		missingDeps bool
 	}{
@@ -140,40 +140,22 @@ func TestInvoiceServiceDiscardDraft_FailurePaths(t *testing.T) {
 		},
 		{
 			name: "invoice lookup failure",
-			setup: func(invoices *invoiceStoreStub, _ *timeEntryStoreStub) {
+			setup: func(invoices *invoiceStoreStub) {
 				invoices.getByIDErr = errors.New("get invoice failed")
 			},
 			want: "get invoice failed",
 		},
 		{
-			name: "non draft invoice",
-			setup: func(invoices *invoiceStoreStub, _ *timeEntryStoreStub) {
-				invoices.getByIDRes = invoiceWithSingleLine("inv_001", "te_001", core.InvoiceStatusIssued)
+			name: "already discarded invoice",
+			setup: func(invoices *invoiceStoreStub) {
+				invoices.getByIDRes = invoiceWithSingleLine("inv_001", "te_001", core.InvoiceStatusDiscarded)
 			},
-			want: "invoice is not draft",
-		},
-		{
-			name: "time entry lookup failure",
-			setup: func(invoices *invoiceStoreStub, entries *timeEntryStoreStub) {
-				invoices.getByIDRes = invoiceWithSingleLine("inv_001", "te_001", core.InvoiceStatusDraft)
-				entries.getByIDErr = errors.New("get entry failed")
-			},
-			want: "get entry failed",
-		},
-		{
-			name: "time entry save failure",
-			setup: func(invoices *invoiceStoreStub, entries *timeEntryStoreStub) {
-				invoices.getByIDRes = invoiceWithSingleLine("inv_001", "te_001", core.InvoiceStatusDraft)
-				entries.getByIDRes = mustTimeEntry("te_001", "cus_abc123", "sa_xyz789", mustHours(15000))
-				entries.saveErr = errors.New("save entry failed")
-			},
-			want: "save entry failed",
+			want: "already discarded",
 		},
 		{
 			name: "delete failure",
-			setup: func(invoices *invoiceStoreStub, entries *timeEntryStoreStub) {
+			setup: func(invoices *invoiceStoreStub) {
 				invoices.getByIDRes = invoiceWithSingleLine("inv_001", "te_001", core.InvoiceStatusDraft)
-				entries.getByIDRes = mustTimeEntry("te_001", "cus_abc123", "sa_xyz789", mustHours(15000))
 				invoices.deleteErr = errors.New("delete failed")
 			},
 			want: "delete failed",
@@ -190,9 +172,8 @@ func TestInvoiceServiceDiscardDraft_FailurePaths(t *testing.T) {
 				svc = NewInvoiceService(nil, nil, nil, nil)
 			} else {
 				invoices := &invoiceStoreStub{}
-				entries := &timeEntryStoreStub{}
-				tt.setup(invoices, entries)
-				svc = NewInvoiceService(invoices, entries, agreementsForInvoice(), profilesForInvoice())
+				tt.setup(invoices)
+				svc = NewInvoiceService(invoices, &timeEntryStoreStub{}, agreementsForInvoice(), profilesForInvoice())
 			}
 
 			err := svc.DiscardDraft(context.Background(), "inv_001")

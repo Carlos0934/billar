@@ -13,6 +13,14 @@ type InvoiceSequenceStore struct {
 	db *sql.DB
 }
 
+// NewInvoiceSequenceStore constructs an InvoiceSequenceStore from an open Store.
+func NewInvoiceSequenceStore(store *Store) *InvoiceSequenceStore {
+	if store == nil {
+		return nil
+	}
+	return &InvoiceSequenceStore{db: store.DB()}
+}
+
 // Next allocates and returns the next invoice number for the current UTC year.
 // The year is derived from the system clock at call time.
 func (s *InvoiceSequenceStore) Next(ctx context.Context) (string, error) {

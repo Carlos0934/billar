@@ -22,6 +22,8 @@ func newServer(cfg config.Config, localAuthEmail string, store *infrasqlite.Stor
 	customerProfileStore := infrasqlite.NewCustomerProfileStore(store)
 	agreementStore := infrasqlite.NewServiceAgreementStore(store)
 	timeEntryStore := infrasqlite.NewTimeEntryStore(store)
+	invoiceStore := infrasqlite.NewInvoiceStore(store)
+	invoiceSequenceStore := infrasqlite.NewInvoiceSequenceStore(store)
 
 	identities, err := app.NewLocalBypassIdentitySource(localAuthEmail, app.IdentityPolicy{
 		AllowedEmails:  cfg.AccessPolicy.AllowedEmails,
@@ -37,6 +39,7 @@ func newServer(cfg config.Config, localAuthEmail string, store *infrasqlite.Stor
 		app.NewCustomerProfileService(legalEntityStore, customerProfileStore),
 		app.NewAgreementService(agreementStore, customerProfileStore),
 		app.NewTimeEntryService(timeEntryStore, customerProfileStore, agreementStore),
+		app.NewInvoiceService(invoiceStore, timeEntryStore, agreementStore, customerProfileStore, invoiceSequenceStore),
 		mcpconnector.NewIngressGuardFromConfig(cfg.AccessPolicy),
 		logger,
 	), nil

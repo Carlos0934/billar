@@ -15,7 +15,8 @@ func TestInvoiceStatusIsValid(t *testing.T) {
 	}{
 		{status: InvoiceStatusDraft, want: true},
 		{status: InvoiceStatusIssued, want: true},
-		{status: InvoiceStatusVoided, want: true},
+		{status: InvoiceStatusDiscarded, want: true},
+		{status: InvoiceStatus("voided"), want: false},
 		{status: InvoiceStatus("pending"), want: false},
 	}
 
@@ -250,6 +251,56 @@ func TestNewInvoiceRejectsInvalidStatus(t *testing.T) {
 
 	if _, err := NewInvoice(InvoiceParams{CustomerID: "cus_123", Status: InvoiceStatus("pending"), Currency: "USD", Lines: []InvoiceLine{{InvoiceID: "inv_x", UnitRate: Money{Amount: 1, Currency: "USD"}}}}); err == nil {
 		t.Fatal("NewInvoice() error = nil, want invalid status rejected")
+	}
+}
+
+func TestInvoiceDiscard_IssuedToDiscarded(t *testing.T) {
+	t.Parallel()
+
+	invoice := Invoice{Status: InvoiceStatusIssued}
+	discardedAt := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+
+	if err := invoice.Discard(discardedAt); err != nil {
+		t.Fatalf("Discard() error = %v", err)
+	}
+	if invoice.Status != InvoiceStatusDiscarded {
+		t.Fatalf("Status = %q, want discarded", invoice.Status)
+	}
+	if !invoice.DiscardedAt.Equal(discardedAt) {
+		t.Fatalf("DiscardedAt = %v, want %v", invoice.DiscardedAt, discardedAt)
+	}
+}
+
+func TestInvoiceDiscard_RejectsDraft(t *testing.T) {
+	t.Parallel()
+
+	invoice := Invoice{Status: InvoiceStatusDraft}
+	if err := invoice.Discard(time.Now().UTC()); err == nil {
+		t.Fatal("Discard() error = nil, want draft rejection")
+	}
+}
+
+func TestInvoiceDiscard_RejectsAlreadyDiscarded(t *testing.T) {
+	t.Parallel()
+
+	invoice := Invoice{Status: InvoiceStatusDiscarded}
+	if err := invoice.Discard(time.Now().UTC()); err == nil {
+		t.Fatal("Discard() error = nil, want already-discarded rejection")
+	}
+}
+
+func TestInvoiceIsDiscarded(t *testing.T) {
+	t.Parallel()
+
+	discarded := Invoice{Status: InvoiceStatusDiscarded}
+	if !discarded.IsDiscarded() {
+		t.Fatal("IsDiscarded() = false, want true")
+	}
+	if (Invoice{Status: InvoiceStatusDraft}).IsDiscarded() {
+		t.Fatal("IsDiscarded() = true for draft invoice")
+	}
+	if (Invoice{Status: InvoiceStatusIssued}).IsDiscarded() {
+		t.Fatal("IsDiscarded() = true for issued invoice")
 	}
 }
 
