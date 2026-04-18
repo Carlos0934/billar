@@ -17,10 +17,12 @@ type InvoiceServiceProvider interface {
 	CreateDraftFromUnbilled(ctx context.Context, cmd app.CreateDraftFromUnbilledCommand) (app.InvoiceDTO, error)
 	IssueDraft(ctx context.Context, cmd app.IssueInvoiceCommand) (app.InvoiceDTO, error)
 	Discard(ctx context.Context, id string) (app.DiscardResult, error)
+	GetInvoice(ctx context.Context, id string) (app.InvoiceDTO, error)
+	ListInvoices(ctx context.Context, customerID string, statusFilter string) ([]app.InvoiceSummaryDTO, error)
 }
 
 func registerInvoiceTools(server *mcpsrv.MCPServer, service InvoiceServiceProvider, guard IngressGuard, logger *slog.Logger) []string {
-	registered := make([]string, 0, 3)
+	registered := make([]string, 0, 5)
 
 	tool, handler := invoiceDraftTool(service, guard, logger)
 	server.AddTool(tool, handler)
@@ -31,6 +33,14 @@ func registerInvoiceTools(server *mcpsrv.MCPServer, service InvoiceServiceProvid
 	registered = append(registered, tool.Name)
 
 	tool, handler = invoiceDiscardTool(service, guard, logger)
+	server.AddTool(tool, handler)
+	registered = append(registered, tool.Name)
+
+	tool, handler = invoiceGetTool(service, guard, logger)
+	server.AddTool(tool, handler)
+	registered = append(registered, tool.Name)
+
+	tool, handler = invoiceListTool(service, guard, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
@@ -172,6 +182,132 @@ func invoiceTextFields(inv app.InvoiceDTO) string {
 	b.WriteString(fmt.Sprintf("Currency: %s\n", inv.Currency))
 	if len(inv.Lines) > 0 {
 		b.WriteString(fmt.Sprintf("Lines: %d\n", len(inv.Lines)))
+	}
+	return b.String()
+}
+
+func invoiceGetTool(service InvoiceServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+	tool := mcp.NewTool("invoice.get",
+		mcp.WithDescription("Retrieve a single invoice by ID, including all line items"),
+		mcp.WithString("id",
+			mcp.Required(),
+			mcp.Description("Invoice ID (e.g., 'inv_123')"),
+		),
+	)
+
+	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if service == nil {
+			return mcp.NewToolResultError("invoice service is required"), nil
+		}
+		if err := guard.authorize(req.Header); err != nil {
+			logging.Event(ctx, logger, slog.LevelWarn, "invoice.get", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		id := strings.TrimSpace(req.GetString("id", ""))
+		if id == "" {
+			return mcp.NewToolResultError("id argument is required"), nil
+		}
+
+		result, err := service.GetInvoice(ctx, id)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultStructured(result, invoiceShowText(result)), nil
+	}
+}
+
+func invoiceListTool(service InvoiceServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+	tool := mcp.NewTool("invoice.list",
+		mcp.WithDescription("List invoices for a customer profile (summary view, no line items)"),
+		mcp.WithString("customer_profile_id",
+			mcp.Required(),
+			mcp.Description("Customer profile ID (e.g., 'cus_123')"),
+		),
+		mcp.WithString("status",
+			mcp.Description("Optional status filter: draft, issued, discarded"),
+		),
+	)
+
+	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if service == nil {
+			return mcp.NewToolResultError("invoice service is required"), nil
+		}
+		if err := guard.authorize(req.Header); err != nil {
+			logging.Event(ctx, logger, slog.LevelWarn, "invoice.list", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		customerProfileID := strings.TrimSpace(req.GetString("customer_profile_id", ""))
+		if customerProfileID == "" {
+			return mcp.NewToolResultError("customer_profile_id argument is required"), nil
+		}
+		statusFilter := strings.TrimSpace(req.GetString("status", ""))
+
+		results, err := service.ListInvoices(ctx, customerProfileID, statusFilter)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		// Ensure empty slice (not nil) for structured output
+		if results == nil {
+			results = []app.InvoiceSummaryDTO{}
+		}
+		return mcp.NewToolResultStructured(results, invoiceListText(results, customerProfileID, statusFilter)), nil
+	}
+}
+
+func invoiceShowText(inv app.InvoiceDTO) string {
+	var b strings.Builder
+	b.WriteString("Invoice\n")
+	b.WriteString("───────\n")
+	b.WriteString(fmt.Sprintf("ID: %s\n", inv.ID))
+	b.WriteString(fmt.Sprintf("Number: %s\n", inv.InvoiceNumber))
+	b.WriteString(fmt.Sprintf("Customer: %s\n", inv.CustomerID))
+	b.WriteString(fmt.Sprintf("Status: %s\n", inv.Status))
+	b.WriteString(fmt.Sprintf("Currency: %s\n", inv.Currency))
+	b.WriteString("\n")
+	b.WriteString("Lines\n")
+	b.WriteString("─────\n")
+	b.WriteString(fmt.Sprintf("%-26s %-10s %-12s %s\n", "Description", "Qty(min)", "Rate", "Total"))
+	for _, line := range inv.Lines {
+		b.WriteString(fmt.Sprintf("%-26s %-10d %-7d %s  %-7d %s\n",
+			line.Description,
+			line.QuantityMin,
+			line.UnitRateAmount, line.UnitRateCurrency,
+			line.LineTotalAmount, line.LineTotalCurrency,
+		))
+	}
+	b.WriteString("\n")
+	b.WriteString("Totals\n")
+	b.WriteString("──────\n")
+	b.WriteString(fmt.Sprintf("Subtotal: %d %s\n", inv.Subtotal, inv.Currency))
+	b.WriteString(fmt.Sprintf("Grand Total: %d %s\n", inv.GrandTotal, inv.Currency))
+	return b.String()
+}
+
+func invoiceListText(summaries []app.InvoiceSummaryDTO, customerID, statusFilter string) string {
+	if len(summaries) == 0 {
+		return "No invoices found.\n"
+	}
+
+	var b strings.Builder
+	b.WriteString("Invoices\n")
+	b.WriteString("────────\n")
+	b.WriteString(fmt.Sprintf("Customer: %s\n", customerID))
+	if statusFilter != "" {
+		b.WriteString(fmt.Sprintf("Status: %s\n", statusFilter))
+	}
+	b.WriteString(fmt.Sprintf("Count: %d\n", len(summaries)))
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("%-16s %-12s %-10s %s\n", "Number", "Status", "Currency", "Total"))
+	for _, s := range summaries {
+		num := s.InvoiceNumber
+		if num == "" {
+			num = "—"
+		}
+		b.WriteString(fmt.Sprintf("%-16s %-12s %-10s %d\n", num, s.Status, s.Currency, s.GrandTotal))
 	}
 	return b.String()
 }

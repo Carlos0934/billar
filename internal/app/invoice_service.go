@@ -13,12 +13,14 @@ import (
 var ErrNoUnbilledEntries = errors.New("no unbilled time entries")
 var ErrCustomerProfileInactive = errors.New("customer profile is inactive")
 var ErrInvoiceNotFound = errors.New("invoice not found")
+var ErrInvalidStatusFilter = errors.New("invalid invoice status filter")
 
 type InvoiceStore interface {
 	CreateDraft(ctx context.Context, invoice *core.Invoice, entries []*core.TimeEntry) error
 	GetByID(ctx context.Context, id string) (*core.Invoice, error)
 	Update(ctx context.Context, invoice *core.Invoice) error
 	Delete(ctx context.Context, id string) error
+	ListByCustomer(ctx context.Context, customerID string, status ...core.InvoiceStatus) ([]core.InvoiceSummary, error)
 }
 
 type InvoiceNumberGenerator interface {
@@ -129,6 +131,63 @@ func (s InvoiceService) CreateDraftFromUnbilled(ctx context.Context, cmd CreateD
 	}
 
 	return invoiceToDTO(invoice, derefTimeEntries(lockedEntries)), nil
+}
+
+func (s InvoiceService) GetInvoice(ctx context.Context, id string) (InvoiceDTO, error) {
+	if strings.TrimSpace(id) == "" {
+		return InvoiceDTO{}, errors.New("invoice id is required")
+	}
+	inv, err := s.getInvoice(ctx, id)
+	if err != nil {
+		return InvoiceDTO{}, fmt.Errorf("get invoice: %w", err)
+	}
+
+	entries := make([]core.TimeEntry, 0, len(inv.Lines))
+	for _, line := range inv.Lines {
+		entry, err := s.getTimeEntry(ctx, line.TimeEntryID)
+		if err != nil {
+			return InvoiceDTO{}, fmt.Errorf("get invoice: load time entry: %w", err)
+		}
+		if entry != nil {
+			entries = append(entries, *entry)
+		}
+	}
+
+	return invoiceToDTO(*inv, entries), nil
+}
+
+func (s InvoiceService) ListInvoices(ctx context.Context, customerID string, statusFilter string) ([]InvoiceSummaryDTO, error) {
+	if strings.TrimSpace(customerID) == "" {
+		return nil, errors.New("customer id is required")
+	}
+
+	var statuses []core.InvoiceStatus
+	if strings.TrimSpace(statusFilter) != "" {
+		s := core.InvoiceStatus(statusFilter)
+		if !s.IsValid() {
+			return nil, fmt.Errorf("list invoices: %w", ErrInvalidStatusFilter)
+		}
+		statuses = append(statuses, s)
+	}
+
+	summaries, err := s.invoices.ListByCustomer(ctx, customerID, statuses...)
+	if err != nil {
+		return nil, fmt.Errorf("list invoices: %w", err)
+	}
+
+	dtos := make([]InvoiceSummaryDTO, 0, len(summaries))
+	for _, s := range summaries {
+		dtos = append(dtos, InvoiceSummaryDTO{
+			ID:            s.ID,
+			InvoiceNumber: s.InvoiceNumber,
+			CustomerID:    s.CustomerID,
+			Status:        string(s.Status),
+			Currency:      s.Currency,
+			GrandTotal:    s.GrandTotal,
+			CreatedAt:     formatInvoiceTime(s.CreatedAt),
+		})
+	}
+	return dtos, nil
 }
 
 func (s InvoiceService) DiscardDraft(ctx context.Context, invoiceID string) error {

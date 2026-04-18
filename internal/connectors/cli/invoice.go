@@ -16,6 +16,8 @@ type InvoiceServiceProvider interface {
 	CreateDraftFromUnbilled(ctx context.Context, cmd app.CreateDraftFromUnbilledCommand) (app.InvoiceDTO, error)
 	IssueDraft(ctx context.Context, cmd app.IssueInvoiceCommand) (app.InvoiceDTO, error)
 	Discard(ctx context.Context, id string) (app.DiscardResult, error)
+	GetInvoice(ctx context.Context, id string) (app.InvoiceDTO, error)
+	ListInvoices(ctx context.Context, customerID string, statusFilter string) ([]app.InvoiceSummaryDTO, error)
 }
 
 func (c Command) runInvoice(ctx context.Context, args []string, out io.Writer) error {
@@ -35,6 +37,10 @@ func (c Command) runInvoice(ctx context.Context, args []string, out io.Writer) e
 		return c.runInvoiceIssue(ctx, args[1:], out)
 	case "discard":
 		return c.runInvoiceDiscard(ctx, args[1:], out)
+	case "show":
+		return c.runInvoiceShow(ctx, args[1:], out)
+	case "list":
+		return c.runInvoiceList(ctx, args[1:], out)
 	default:
 		return fmt.Errorf("unknown command %q", strings.Join([]string{"invoice", args[0]}, " "))
 	}
@@ -232,5 +238,142 @@ func writeInvoiceText(out io.Writer, inv app.InvoiceDTO, colorEnabled bool) erro
 		view.Field("Lines", fmt.Sprintf("%d", len(inv.Lines)))
 	}
 	_, err := io.WriteString(out, view.Build())
+	return err
+}
+
+func (c Command) runInvoiceShow(ctx context.Context, args []string, out io.Writer) error {
+	id, format, err := parseInvoiceIDFlags("invoice show", args)
+	if err != nil {
+		return err
+	}
+
+	result, err := c.invoice.GetInvoice(ctx, id)
+	if err != nil {
+		return fmt.Errorf("run invoice show command: %w", err)
+	}
+
+	output := OutputResult{
+		Payload: result,
+		TextWriter: func(w io.Writer) error {
+			return buildInvoiceShowText(w, result, c.colorEnabled)
+		},
+	}
+
+	if err := WriteOutput(out, format, output); err != nil {
+		return fmt.Errorf("write invoice show output: %w", err)
+	}
+	return nil
+}
+
+func (c Command) runInvoiceList(ctx context.Context, args []string, out io.Writer) error {
+	customerID, statusFilter, format, err := parseInvoiceListFlags(args)
+	if err != nil {
+		return err
+	}
+
+	results, err := c.invoice.ListInvoices(ctx, customerID, statusFilter)
+	if err != nil {
+		return fmt.Errorf("run invoice list command: %w", err)
+	}
+
+	output := OutputResult{
+		Payload: results,
+		TextWriter: func(w io.Writer) error {
+			return buildInvoiceListText(w, results, customerID, statusFilter, c.colorEnabled)
+		},
+	}
+
+	if err := WriteOutput(out, format, output); err != nil {
+		return fmt.Errorf("write invoice list output: %w", err)
+	}
+	return nil
+}
+
+func parseInvoiceListFlags(args []string) (string, string, Format, error) {
+	flags := flag.NewFlagSet("invoice list", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+
+	var (
+		customerID  string
+		status      string
+		formatValue string
+	)
+
+	flags.StringVar(&customerID, "customer-id", "", "customer profile ID")
+	flags.StringVar(&status, "status", "", "optional status filter (draft|issued|discarded)")
+	flags.StringVar(&formatValue, "format", string(FormatText), "output format")
+
+	if err := flags.Parse(args); err != nil {
+		return "", "", "", fmt.Errorf("invoice list: %w", err)
+	}
+	if customerID == "" {
+		return "", "", "", errors.New("--customer-id is required")
+	}
+
+	format, err := ParseFormat(formatValue)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	return customerID, status, format, nil
+}
+
+func buildInvoiceShowText(out io.Writer, inv app.InvoiceDTO, colorEnabled bool) error {
+	var b strings.Builder
+
+	b.WriteString("Invoice\n")
+	b.WriteString("───────\n")
+	b.WriteString(fmt.Sprintf("ID: %s\n", inv.ID))
+	b.WriteString(fmt.Sprintf("Number: %s\n", inv.InvoiceNumber))
+	b.WriteString(fmt.Sprintf("Customer: %s\n", inv.CustomerID))
+	b.WriteString(fmt.Sprintf("Status: %s\n", inv.Status))
+	b.WriteString(fmt.Sprintf("Currency: %s\n", inv.Currency))
+	b.WriteString("\n")
+	b.WriteString("Lines\n")
+	b.WriteString("─────\n")
+	b.WriteString(fmt.Sprintf("%-26s %-10s %-12s %s\n", "Description", "Qty(min)", "Rate", "Total"))
+	for _, line := range inv.Lines {
+		b.WriteString(fmt.Sprintf("%-26s %-10d %-7d %s  %-7d %s\n",
+			line.Description,
+			line.QuantityMin,
+			line.UnitRateAmount, line.UnitRateCurrency,
+			line.LineTotalAmount, line.LineTotalCurrency,
+		))
+	}
+	b.WriteString("\n")
+	b.WriteString("Totals\n")
+	b.WriteString("──────\n")
+	b.WriteString(fmt.Sprintf("Subtotal: %d %s\n", inv.Subtotal, inv.Currency))
+	b.WriteString(fmt.Sprintf("Grand Total: %d %s\n", inv.GrandTotal, inv.Currency))
+
+	_, err := io.WriteString(out, b.String())
+	return err
+}
+
+func buildInvoiceListText(out io.Writer, summaries []app.InvoiceSummaryDTO, customerID, statusFilter string, colorEnabled bool) error {
+	if len(summaries) == 0 {
+		_, err := io.WriteString(out, "No invoices found.\n")
+		return err
+	}
+
+	var b strings.Builder
+	b.WriteString("Invoices\n")
+	b.WriteString("────────\n")
+	b.WriteString(fmt.Sprintf("Customer: %s\n", customerID))
+	if statusFilter != "" {
+		b.WriteString(fmt.Sprintf("Status: %s\n", statusFilter))
+	}
+	b.WriteString(fmt.Sprintf("Count: %d\n", len(summaries)))
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("%-16s %-12s %-10s %s\n", "Number", "Status", "Currency", "Total"))
+	for _, s := range summaries {
+		num := s.InvoiceNumber
+		if num == "" {
+			num = "—"
+		}
+		b.WriteString(fmt.Sprintf("%-16s %-12s %-10s %d\n", num, s.Status, s.Currency, s.GrandTotal))
+	}
+
+	_, err := io.WriteString(out, b.String())
 	return err
 }

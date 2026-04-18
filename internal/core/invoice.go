@@ -211,6 +211,18 @@ func (i Invoice) Total(entries []TimeEntry) Money {
 	return total
 }
 
+// InvoiceSummary is a lightweight view of an invoice for list operations
+// (no line items, grand_total computed by the store).
+type InvoiceSummary struct {
+	ID            string
+	InvoiceNumber string
+	CustomerID    string
+	Status        InvoiceStatus
+	Currency      string
+	GrandTotal    int64
+	CreatedAt     time.Time
+}
+
 func generateInvoiceID() string {
 	return generatePrefixedID(invoiceIDPrefix, invoiceIDBytes)
 }

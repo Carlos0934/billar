@@ -8,8 +8,9 @@ import (
 )
 
 type metadataResponse struct {
-	ResourceURI          string   `json:"resource"`
-	AuthorizationServers []string `json:"authorization_servers"`
+	ResourceURI            string   `json:"resource"`
+	AuthorizationServers   []string `json:"authorization_servers"`
+	BearerMethodsSupported []string `json:"bearer_methods_supported"`
 }
 
 func MetadataHandler(challenge app.OAuthChallengeDTO) http.HandlerFunc {
@@ -22,8 +23,9 @@ func MetadataHandler(challenge app.OAuthChallengeDTO) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(metadataResponse{
-			ResourceURI:          challenge.ResourceURI,
-			AuthorizationServers: challenge.AuthorizationServers,
+			ResourceURI:            challenge.ResourceURI,
+			AuthorizationServers:   challenge.AuthorizationServers,
+			BearerMethodsSupported: []string{"bearer"},
 		})
 	}
 }

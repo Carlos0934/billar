@@ -71,8 +71,9 @@ func TestMetadataHandler(t *testing.T) {
 			}
 
 			var got struct {
-				ResourceURI          string   `json:"resource"`
-				AuthorizationServers []string `json:"authorization_servers"`
+				ResourceURI            string   `json:"resource"`
+				AuthorizationServers   []string `json:"authorization_servers"`
+				BearerMethodsSupported []string `json:"bearer_methods_supported"`
 			}
 			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 				t.Fatalf("json.Unmarshal() error = %v", err)
@@ -88,6 +89,18 @@ func TestMetadataHandler(t *testing.T) {
 				if got.AuthorizationServers[i] != tc.wantServers[i] {
 					t.Fatalf("authorization_servers[%d] = %q, want %q", i, got.AuthorizationServers[i], tc.wantServers[i])
 				}
+			}
+			if len(got.BearerMethodsSupported) == 0 {
+				t.Fatal("bearer_methods_supported = empty, want at least one method")
+			}
+			foundBearer := false
+			for _, m := range got.BearerMethodsSupported {
+				if m == "bearer" {
+					foundBearer = true
+				}
+			}
+			if !foundBearer {
+				t.Fatalf("bearer_methods_supported = %v, want to contain \"bearer\"", got.BearerMethodsSupported)
 			}
 		})
 	}

@@ -11,15 +11,18 @@ import (
 )
 
 type invoiceStoreStub struct {
-	createDraftInvoice *core.Invoice
-	createDraftEntries []*core.TimeEntry
-	updateInvoice      *core.Invoice
-	updateErr          error
-	createDraftErr     error
-	getByIDRes         *core.Invoice
-	getByIDErr         error
-	deleteID           string
-	deleteErr          error
+	createDraftInvoice         *core.Invoice
+	createDraftEntries         []*core.TimeEntry
+	updateInvoice              *core.Invoice
+	updateErr                  error
+	createDraftErr             error
+	getByIDRes                 *core.Invoice
+	getByIDErr                 error
+	deleteID                   string
+	deleteErr                  error
+	listByCustomerRes          []core.InvoiceSummary
+	listByCustomerErr          error
+	listByCustomerStatusFilter string
 }
 
 func (s *invoiceStoreStub) CreateDraft(ctx context.Context, invoice *core.Invoice, entries []*core.TimeEntry) error {
@@ -44,6 +47,14 @@ func (s *invoiceStoreStub) Update(ctx context.Context, invoice *core.Invoice) er
 	_ = ctx
 	s.updateInvoice = invoice
 	return s.updateErr
+}
+
+func (s *invoiceStoreStub) ListByCustomer(ctx context.Context, customerID string, status ...core.InvoiceStatus) ([]core.InvoiceSummary, error) {
+	_ = ctx
+	if s.listByCustomerStatusFilter != "" && (len(status) == 0 || string(status[0]) != s.listByCustomerStatusFilter) {
+		return nil, nil
+	}
+	return s.listByCustomerRes, s.listByCustomerErr
 }
 
 type invoiceNumberGeneratorStub struct {
@@ -427,6 +438,134 @@ func (s *multiEntryStoreStub) GetByID(ctx context.Context, id string) (*core.Tim
 		return s.second, nil
 	}
 	return s.timeEntryStoreStub.GetByID(ctx, id)
+}
+
+func TestInvoiceServiceGetInvoice_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	hours := mustHours(15000)
+	entry1 := mustIssueDraftEntry("te_001", "Work A", hours)
+	entry2 := mustIssueDraftEntry("te_002", "Work B", mustHours(30000))
+	rate, _ := core.NewMoney(10000, "USD")
+	line1, _ := core.NewInvoiceLine(core.InvoiceLineParams{InvoiceID: "inv_001", ServiceAgreementID: "sa_1", TimeEntryID: "te_001", UnitRate: rate})
+	line2, _ := core.NewInvoiceLine(core.InvoiceLineParams{InvoiceID: "inv_001", ServiceAgreementID: "sa_1", TimeEntryID: "te_002", UnitRate: rate})
+	inv, _ := core.NewInvoice(core.InvoiceParams{CustomerID: "cus_1", Status: core.InvoiceStatusDraft, Currency: "USD", Lines: []core.InvoiceLine{line1, line2}})
+	inv.ID = "inv_001"
+
+	entries := &multiEntryStoreStub{
+		timeEntryStoreStub: timeEntryStoreStub{getByIDRes: entry1},
+		second:             entry2,
+		secondID:           "te_002",
+	}
+	invoices := &invoiceStoreStub{getByIDRes: &inv}
+	svc := NewInvoiceService(invoices, entries, nil, nil)
+
+	dto, err := svc.GetInvoice(context.Background(), "inv_001")
+	if err != nil {
+		t.Fatalf("GetInvoice() error = %v", err)
+	}
+	if dto.ID != "inv_001" {
+		t.Fatalf("ID = %q, want inv_001", dto.ID)
+	}
+	if len(dto.Lines) != 2 {
+		t.Fatalf("len(Lines) = %d, want 2", len(dto.Lines))
+	}
+	if dto.Lines[0].Description != "Work A" {
+		t.Fatalf("Lines[0].Description = %q, want Work A", dto.Lines[0].Description)
+	}
+	if dto.Lines[1].Description != "Work B" {
+		t.Fatalf("Lines[1].Description = %q, want Work B", dto.Lines[1].Description)
+	}
+}
+
+func TestInvoiceServiceGetInvoice_NotFound(t *testing.T) {
+	t.Parallel()
+
+	invoices := &invoiceStoreStub{getByIDErr: ErrInvoiceNotFound}
+	svc := NewInvoiceService(invoices, &timeEntryStoreStub{}, nil, nil)
+
+	_, err := svc.GetInvoice(context.Background(), "inv_999")
+	if !errors.Is(err, ErrInvoiceNotFound) {
+		t.Fatalf("GetInvoice() error = %v, want ErrInvoiceNotFound", err)
+	}
+}
+
+func TestInvoiceServiceListInvoices_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	summaries := []core.InvoiceSummary{
+		{ID: "inv_001", InvoiceNumber: "INV-001", Status: core.InvoiceStatusIssued, Currency: "USD", GrandTotal: 5000},
+		{ID: "inv_002", InvoiceNumber: "", Status: core.InvoiceStatusDraft, Currency: "USD", GrandTotal: 3000},
+	}
+	invoices := &invoiceStoreStub{listByCustomerRes: summaries}
+	svc := NewInvoiceService(invoices, nil, nil, nil)
+
+	dtos, err := svc.ListInvoices(context.Background(), "cus_1", "")
+	if err != nil {
+		t.Fatalf("ListInvoices() error = %v", err)
+	}
+	if len(dtos) != 2 {
+		t.Fatalf("len(dtos) = %d, want 2", len(dtos))
+	}
+	if dtos[0].ID != "inv_001" {
+		t.Fatalf("dtos[0].ID = %q, want inv_001", dtos[0].ID)
+	}
+	if dtos[1].Status != "draft" {
+		t.Fatalf("dtos[1].Status = %q, want draft", dtos[1].Status)
+	}
+}
+
+func TestInvoiceServiceListInvoices_StatusFilter(t *testing.T) {
+	t.Parallel()
+
+	summaries := []core.InvoiceSummary{
+		{ID: "inv_002", Status: core.InvoiceStatusDraft, Currency: "USD", GrandTotal: 3000},
+	}
+	invoices := &invoiceStoreStub{listByCustomerRes: summaries, listByCustomerStatusFilter: "draft"}
+	svc := NewInvoiceService(invoices, nil, nil, nil)
+
+	dtos, err := svc.ListInvoices(context.Background(), "cus_1", "draft")
+	if err != nil {
+		t.Fatalf("ListInvoices() error = %v", err)
+	}
+	if len(dtos) != 1 {
+		t.Fatalf("len(dtos) = %d, want 1", len(dtos))
+	}
+	if dtos[0].Status != "draft" {
+		t.Fatalf("dtos[0].Status = %q, want draft", dtos[0].Status)
+	}
+}
+
+func TestInvoiceServiceListInvoices_InvalidStatusFilter(t *testing.T) {
+	t.Parallel()
+
+	invoices := &invoiceStoreStub{}
+	svc := NewInvoiceService(invoices, nil, nil, nil)
+
+	_, err := svc.ListInvoices(context.Background(), "cus_1", "pending")
+	if !errors.Is(err, ErrInvalidStatusFilter) {
+		t.Fatalf("ListInvoices() error = %v, want ErrInvalidStatusFilter", err)
+	}
+
+	_, err = svc.ListInvoices(context.Background(), "cus_1", "DRAFT")
+	if !errors.Is(err, ErrInvalidStatusFilter) {
+		t.Fatalf("ListInvoices() with uppercase 'DRAFT' error = %v, want ErrInvalidStatusFilter", err)
+	}
+}
+
+func TestInvoiceServiceListInvoices_Empty(t *testing.T) {
+	t.Parallel()
+
+	invoices := &invoiceStoreStub{listByCustomerRes: nil}
+	svc := NewInvoiceService(invoices, nil, nil, nil)
+
+	dtos, err := svc.ListInvoices(context.Background(), "cus_999", "")
+	if err != nil {
+		t.Fatalf("ListInvoices() error = %v", err)
+	}
+	if len(dtos) != 0 {
+		t.Fatalf("len(dtos) = %d, want 0", len(dtos))
+	}
 }
 
 func agreementsForInvoice() *serviceAgreementStoreForTimeEntry {

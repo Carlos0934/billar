@@ -211,6 +211,54 @@ func (s *InvoiceStore) Delete(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
+// ListByCustomer returns summary-only invoices for a customer, computing grand_total
+// via a correlated aggregate subquery. An optional status filter can be applied.
+func (s *InvoiceStore) ListByCustomer(ctx context.Context, customerID string, status ...core.InvoiceStatus) ([]core.InvoiceSummary, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("invoice sqlite store is required")
+	}
+
+	query := `
+SELECT i.id, i.invoice_number, i.customer_id, i.status, i.currency, i.created_at,
+       COALESCE((SELECT SUM(il.unit_rate_amount * te.hours / 10000)
+                 FROM invoice_lines il
+                 JOIN time_entries te ON te.id = il.time_entry_id
+                 WHERE il.invoice_id = i.id), 0) AS grand_total
+FROM invoices i
+WHERE i.customer_id = ?`
+
+	args := []interface{}{customerID}
+	if len(status) > 0 {
+		query += " AND i.status = ?"
+		args = append(args, string(status[0]))
+	}
+	query += " ORDER BY i.created_at DESC"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list invoices by customer: %w", err)
+	}
+	defer rows.Close()
+
+	var summaries []core.InvoiceSummary
+	for rows.Next() {
+		var sum core.InvoiceSummary
+		var createdAtNano sql.NullInt64
+		var status string
+		if err := rows.Scan(&sum.ID, &sum.InvoiceNumber, &sum.CustomerID, &status, &sum.Currency, &createdAtNano, &sum.GrandTotal); err != nil {
+			return nil, fmt.Errorf("scan invoice summary: %w", err)
+		}
+		sum.Status = core.InvoiceStatus(status)
+		sum.CreatedAt = nanoToTime(createdAtNano)
+		summaries = append(summaries, sum)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate invoice summaries: %w", err)
+	}
+
+	return summaries, nil
+}
+
 func timeToNano(t time.Time) interface{} {
 	if t.IsZero() {
 		return nil

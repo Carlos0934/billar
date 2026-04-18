@@ -1,13 +1,13 @@
 {
-    "$schema": "https://opencode.ai/config.json",
-    "mcp": {
-        "billar": {
-            "type": "local",
-            "command": [
-                "go",
-                "run",
-                "./cmd/mcp"
-            ]
-        }
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "billar": {
+      "type": "remote",
+      "url": "http://127.0.0.1:8080/v1/mcp",
+      "oauth": {
+        "scope": "tools:read tools:execute"
+      },
+      "command": ["go", "run", "./cmd/mcp"]
     }
+  }
 }

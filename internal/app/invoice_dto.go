@@ -38,6 +38,16 @@ type InvoiceLineDTO struct {
 	LineTotalCurrency  string `json:"line_total_currency" toon:"line_total_currency"`
 }
 
+type InvoiceSummaryDTO struct {
+	ID            string `json:"id" toon:"id"`
+	InvoiceNumber string `json:"invoice_number" toon:"invoice_number"`
+	CustomerID    string `json:"customer_id" toon:"customer_id"`
+	Status        string `json:"status" toon:"status"`
+	Currency      string `json:"currency" toon:"currency"`
+	GrandTotal    int64  `json:"grand_total" toon:"grand_total"`
+	CreatedAt     string `json:"created_at" toon:"created_at"`
+}
+
 type CreateDraftFromUnbilledCommand struct {
 	CustomerProfileID string `json:"customer_profile_id"`
 }

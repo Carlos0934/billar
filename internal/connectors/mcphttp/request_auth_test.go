@@ -134,13 +134,13 @@ func TestMCPHTTPAuthMiddlewareLogsSafeFields(t *testing.T) {
 	}
 	logged := logBuf.String()
 	// Verify message_classified event
-	for _, want := range []string{"operation=mcp.request_auth", "connector=mcp-http", "outcome=message_classified", "message_type=invalid", "method=", "is_discovery=false", "has_bearer_token=true", "body_parseable=false"} {
+	for _, want := range []string{"operation=mcp.request_auth", "connector=mcp-http", "outcome=message_classified", "message_type=invalid", "method=", "has_bearer_token=true", "body_parseable=false"} {
 		if !strings.Contains(logged, want) {
 			t.Fatalf("log output missing %q: %q", want, logged)
 		}
 	}
 	// Verify denied event with enhanced fields
-	for _, want := range []string{"outcome=denied", "reason=invalid_bearer_token", "is_discovery=false"} {
+	for _, want := range []string{"outcome=denied", "reason=invalid_bearer_token"} {
 		if !strings.Contains(logged, want) {
 			t.Fatalf("log output missing %q: %q", want, logged)
 		}
@@ -183,29 +183,35 @@ func TestClassifyRequestAuthReason(t *testing.T) {
 	}
 }
 
-func TestIsDiscoveryMethod(t *testing.T) {
+func TestMCPHTTPAuthMiddlewareChallengesAllUnauthenticated(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		method string
-		want   bool
-	}{
-		{method: "initialize", want: true},
-		{method: "notifications/initialized", want: true},
-		{method: "tools/list", want: true},
-		{method: "tools/call", want: false},
-		{method: "resources/read", want: false},
-		{method: "prompts/get", want: false},
-		{method: "", want: false},
-		{method: "unknown", want: false},
+	// All methods — including formerly-allowlisted ones — must return 401 when unauthenticated.
+	methods := []string{
+		"initialize",
+		"notifications/initialized",
+		"tools/list",
+		"tools/call",
+		"resources/read",
 	}
 
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.method, func(t *testing.T) {
+	for _, method := range methods {
+		method := method
+		t.Run(method, func(t *testing.T) {
 			t.Parallel()
-			if got := isDiscoveryMethod(tc.method); got != tc.want {
-				t.Fatalf("isDiscoveryMethod(%q) = %v, want %v", tc.method, got, tc.want)
+			authenticator := &requestAuthenticatorStub{err: app.ErrMissingBearerToken}
+			handler := NewMCPHTTPAuthMiddleware(authenticator, app.OAuthChallengeDTO{ResourceURI: "https://resource.example"}, nil).Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Fatalf("next should not be called for unauthenticated %q", method)
+			}))
+			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":%q,"params":{}}`, method)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "http://example.test/v1/mcp", strings.NewReader(body))
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("method %q: status = %d, want %d", method, rec.Code, http.StatusUnauthorized)
+			}
+			if rec.Header().Get("WWW-Authenticate") == "" {
+				t.Fatalf("method %q: WWW-Authenticate header missing", method)
 			}
 		})
 	}
@@ -246,7 +252,7 @@ func TestMCPHTTPAuthMiddlewareBodyBuffering(t *testing.T) {
 		body       string
 		wantStatus int
 	}{
-		{name: "buffered body readable downstream", body: `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`, wantStatus: http.StatusNoContent},
+		{name: "buffered body readable downstream", body: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}`, wantStatus: http.StatusNoContent},
 	}
 
 	for _, tc := range tests {
@@ -254,7 +260,7 @@ func TestMCPHTTPAuthMiddlewareBodyBuffering(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			authenticator := &requestAuthenticatorStub{err: app.ErrMissingBearerToken}
+			authenticator := &requestAuthenticatorStub{err: nil}
 			downstreamBody := ""
 			handler := NewMCPHTTPAuthMiddleware(authenticator, app.OAuthChallengeDTO{}, nil).Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				buf, err := io.ReadAll(r.Body)
@@ -294,34 +300,34 @@ func TestMCPHTTPAuthMiddlewareAllowlistAuthLogic(t *testing.T) {
 		wantWWWAuthenticate   bool
 	}{
 		{
-			name:                  "allowlisted method initialize with no token allows request",
+			name:                  "initialize with no token rejects with 401",
 			body:                  `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
 			authHeader:            "",
 			authErr:               app.ErrMissingBearerToken,
-			wantStatus:            http.StatusNoContent,
+			wantStatus:            http.StatusUnauthorized,
 			wantIdentityInContext: false,
-			wantWWWAuthenticate:   false,
+			wantWWWAuthenticate:   true,
 		},
 		{
-			name:                  "allowlisted method tools/list with no token allows request",
+			name:                  "tools/list with no token rejects with 401",
 			body:                  `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
 			authHeader:            "",
 			authErr:               app.ErrMissingBearerToken,
-			wantStatus:            http.StatusNoContent,
+			wantStatus:            http.StatusUnauthorized,
 			wantIdentityInContext: false,
-			wantWWWAuthenticate:   false,
+			wantWWWAuthenticate:   true,
 		},
 		{
-			name:                  "allowlisted method notifications/initialized with no token allows request",
+			name:                  "notifications/initialized with no token rejects with 401",
 			body:                  `{"jsonrpc":"2.0","id":3,"method":"notifications/initialized","params":{}}`,
 			authHeader:            "",
 			authErr:               app.ErrMissingBearerToken,
-			wantStatus:            http.StatusNoContent,
+			wantStatus:            http.StatusUnauthorized,
 			wantIdentityInContext: false,
-			wantWWWAuthenticate:   false,
+			wantWWWAuthenticate:   true,
 		},
 		{
-			name:                  "allowlisted method with valid token adds identity to context",
+			name:                  "initialize with valid token adds identity to context",
 			body:                  `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
 			authHeader:            "Bearer token-123",
 			authErr:               nil,
@@ -330,7 +336,7 @@ func TestMCPHTTPAuthMiddlewareAllowlistAuthLogic(t *testing.T) {
 			wantWWWAuthenticate:   false,
 		},
 		{
-			name:                  "non-allowlisted method tools/call with no token rejects with 401",
+			name:                  "tools/call with no token rejects with 401",
 			body:                  `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}`,
 			authHeader:            "",
 			authErr:               app.ErrMissingBearerToken,
@@ -339,7 +345,7 @@ func TestMCPHTTPAuthMiddlewareAllowlistAuthLogic(t *testing.T) {
 			wantWWWAuthenticate:   true,
 		},
 		{
-			name:                  "non-allowlisted method with valid token allows request",
+			name:                  "tools/call with valid token allows request",
 			body:                  `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}`,
 			authHeader:            "Bearer token-123",
 			authErr:               nil,
@@ -431,7 +437,7 @@ func TestMCPHTTPAuthMiddlewareAllowlistAuthLogic(t *testing.T) {
 	}
 }
 
-func TestMCPHTTPAuthMiddlewareLogsAuthSkippedDiscovery(t *testing.T) {
+func TestMCPHTTPAuthMiddlewareChallengesInitializeWithoutToken(t *testing.T) {
 	t.Parallel()
 
 	var logBuf bytes.Buffer
@@ -439,7 +445,7 @@ func TestMCPHTTPAuthMiddlewareLogsAuthSkippedDiscovery(t *testing.T) {
 
 	authenticator := &requestAuthenticatorStub{err: app.ErrMissingBearerToken}
 	handler := NewMCPHTTPAuthMiddleware(authenticator, app.OAuthChallengeDTO{ResourceURI: "https://resource.example"}, logger).Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
+		t.Fatal("next handler should not be called for unauthenticated initialize")
 	}))
 
 	rec := httptest.NewRecorder()
@@ -447,37 +453,26 @@ func TestMCPHTTPAuthMiddlewareLogsAuthSkippedDiscovery(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if rec.Header().Get("WWW-Authenticate") == "" {
+		t.Fatal("WWW-Authenticate header missing for unauthenticated initialize request")
 	}
 
 	logged := logBuf.String()
-	// Verify message_classified event
 	if !strings.Contains(logged, "outcome=message_classified") {
 		t.Fatalf("log output missing message_classified event: %q", logged)
 	}
 	if !strings.Contains(logged, "method=initialize") {
 		t.Fatalf("log output missing method=initialize: %q", logged)
 	}
-	if !strings.Contains(logged, "is_discovery=true") {
-		t.Fatalf("log output missing is_discovery=true: %q", logged)
-	}
-	if !strings.Contains(logged, "has_bearer_token=false") {
-		t.Fatalf("log output missing has_bearer_token=false: %q", logged)
-	}
-	if !strings.Contains(logged, "message_type=request") {
-		t.Fatalf("log output missing message_type=request: %q", logged)
-	}
-	if !strings.Contains(logged, "body_parseable=true") {
-		t.Fatalf("log output missing body_parseable=true: %q", logged)
-	}
-	// Verify auth_skipped_discovery event is logged
-	if !strings.Contains(logged, "auth_skipped_discovery") {
-		t.Fatalf("log output missing auth_skipped_discovery event: %q", logged)
+	if !strings.Contains(logged, "outcome=denied") {
+		t.Fatalf("log output missing denied event: %q", logged)
 	}
 }
 
-func TestMCPHTTPAuthMiddlewareLogsOpportunisticAuth(t *testing.T) {
+func TestMCPHTTPAuthMiddlewareLogsAuthenticatedInitialize(t *testing.T) {
 	t.Parallel()
 
 	var logBuf bytes.Buffer
@@ -499,25 +494,17 @@ func TestMCPHTTPAuthMiddlewareLogsOpportunisticAuth(t *testing.T) {
 	}
 
 	logged := logBuf.String()
-	// Verify message_classified event shows discovery method with bearer token
 	if !strings.Contains(logged, "outcome=message_classified") {
 		t.Fatalf("log output missing message_classified event: %q", logged)
 	}
 	if !strings.Contains(logged, "method=initialize") {
 		t.Fatalf("log output missing method=initialize: %q", logged)
 	}
-	if !strings.Contains(logged, "is_discovery=true") {
-		t.Fatalf("log output missing is_discovery=true: %q", logged)
-	}
 	if !strings.Contains(logged, "has_bearer_token=true") {
 		t.Fatalf("log output missing has_bearer_token=true: %q", logged)
 	}
 	if !strings.Contains(logged, "message_type=request") {
 		t.Fatalf("log output missing message_type=request: %q", logged)
-	}
-	// Verify opportunistic_auth event is logged
-	if !strings.Contains(logged, "outcome=opportunistic_auth") {
-		t.Fatalf("log output missing opportunistic_auth event: %q", logged)
 	}
 }
 
@@ -528,13 +515,13 @@ func TestMCPHTTPAuthMiddlewareLogsDeniedWithMethodContext(t *testing.T) {
 		name            string
 		body            string
 		wantParseable   bool
-		wantIsDiscovery bool
 		wantMethod      string
 		wantMessageType string
 	}{
-		{name: "non-discovery method denied", body: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}`, wantParseable: true, wantIsDiscovery: false, wantMethod: "tools/call", wantMessageType: "request"},
-		{name: "malformed body denied", body: `{invalid json}`, wantParseable: false, wantIsDiscovery: false, wantMethod: "", wantMessageType: "invalid"},
-		{name: "missing method field denied", body: `{"jsonrpc":"2.0","id":1}`, wantParseable: true, wantIsDiscovery: false, wantMethod: "", wantMessageType: "unknown"},
+		{name: "initialize denied without token", body: `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`, wantParseable: true, wantMethod: "initialize", wantMessageType: "request"},
+		{name: "non-discovery method denied", body: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}`, wantParseable: true, wantMethod: "tools/call", wantMessageType: "request"},
+		{name: "malformed body denied", body: `{invalid json}`, wantParseable: false, wantMethod: "", wantMessageType: "invalid"},
+		{name: "missing method field denied", body: `{"jsonrpc":"2.0","id":1}`, wantParseable: true, wantMethod: "", wantMessageType: "unknown"},
 	}
 
 	for _, tc := range tests {
@@ -572,9 +559,6 @@ func TestMCPHTTPAuthMiddlewareLogsDeniedWithMethodContext(t *testing.T) {
 			}
 			if !strings.Contains(logged, fmt.Sprintf("message_type=%s", tc.wantMessageType)) {
 				t.Fatalf("log output missing message_type=%s: %q", tc.wantMessageType, logged)
-			}
-			if !strings.Contains(logged, fmt.Sprintf("is_discovery=%v", tc.wantIsDiscovery)) {
-				t.Fatalf("log output missing is_discovery=%v: %q", tc.wantIsDiscovery, logged)
 			}
 			if !strings.Contains(logged, fmt.Sprintf("body_parseable=%v", tc.wantParseable)) {
 				t.Fatalf("log output missing body_parseable=%v: %q", tc.wantParseable, logged)

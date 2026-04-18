@@ -562,11 +562,13 @@ type TimeEntryService interface {
 }
 
 type InvoiceService interface {
-    CreateDraftFromUnbilled(ctx context.Context, cmd CreateDraftInvoiceFromUnbilledTimeCommand) (InvoiceDTO, error)
-    IssueDraft(ctx context.Context, invoiceID string) (InvoiceDTO, error)
+    CreateDraftFromUnbilled(ctx context.Context, cmd CreateDraftFromUnbilledCommand) (InvoiceDTO, error)
+    IssueDraft(ctx context.Context, cmd IssueInvoiceCommand) (InvoiceDTO, error)
     Discard(ctx context.Context, invoiceID string) (DiscardResult, error)
-    Get(ctx context.Context, invoiceID string) (InvoiceDTO, error)
-    RenderPDF(ctx context.Context, invoiceID string) (RenderedDocumentDTO, error)
+    GetInvoice(ctx context.Context, invoiceID string) (InvoiceDTO, error)
+    ListInvoices(ctx context.Context, customerID string, statusFilter string) ([]InvoiceSummaryDTO, error)
+    // RenderPDF is deferred (not yet implemented)
+    // RenderPDF(ctx context.Context, invoiceID string) (RenderedDocumentDTO, error)
 }
 
 type SessionService interface {
@@ -624,6 +626,7 @@ type InvoiceStore interface {
     GetByID(ctx context.Context, id string) (*Invoice, error)
     Update(ctx context.Context, invoice *Invoice) error
     Delete(ctx context.Context, id string) error
+    ListByCustomer(ctx context.Context, customerID string, status ...InvoiceStatus) ([]InvoiceSummary, error)
 }
 
 type IssuerProfileStore interface {
@@ -771,6 +774,7 @@ billar invoice draft --customer <customer-profile-id> --from <date> --to <date>
 billar invoice issue --id <id>
 billar invoice discard --id <id>
 billar invoice show --id <id>
+billar invoice list --customer-id <customer-profile-id> [--status <status>]
 billar invoice pdf --id <id>
 ```
 
@@ -796,12 +800,12 @@ billar invoice pdf --id <id>
 * `invoice.draft`
 * `invoice.issue`
 * `invoice.discard`
+* `invoice.get` — implemented (returns full `InvoiceDTO` with hydrated lines)
+* `invoice.list` — implemented (returns `[]InvoiceSummaryDTO`, supports optional `status` filter)
 
 **Deferred (future slices — not in current MCP surface)**:
 
 * ~~`invoice.create_draft_from_unbilled`~~ — replaced by `invoice.draft` in current slice
-* ~~`invoice.get`~~ — deferred; not yet implemented
-* ~~`invoice.list`~~ — deferred; not yet implemented
 * ~~`invoice.render_pdf`~~ — deferred; PDF rendering not yet wired
 
 **Removed tools** (legal entity is always accessed via its owning profile, never directly):

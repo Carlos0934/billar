@@ -50,16 +50,6 @@ type jsonrpcRequestPeek struct {
 	Error  json.RawMessage `json:"error"`
 }
 
-var allowlistedMethods = map[string]bool{
-	"initialize":                true,
-	"notifications/initialized": true,
-	"tools/list":                true,
-}
-
-func isDiscoveryMethod(m string) bool {
-	return allowlistedMethods[m]
-}
-
 // classifyJSONRPCMessage analyzes the body and returns message classification.
 func classifyJSONRPCMessage(body []byte) JSONRPCMessageInfo {
 	info := JSONRPCMessageInfo{
@@ -189,7 +179,6 @@ func (m MCPHTTPAuthMiddleware) Wrap(next http.Handler) http.Handler {
 
 		// Classify JSON-RPC message shape for observability
 		msgInfo := classifyJSONRPCMessage(bodyBytes)
-		isDiscovery := isDiscoveryMethod(msgInfo.Method)
 		bearerToken := bearerTokenFromHeader(r.Header.Get("Authorization"))
 		hasBearerToken := bearerToken != ""
 
@@ -203,37 +192,18 @@ func (m MCPHTTPAuthMiddleware) Wrap(next http.Handler) http.Handler {
 			"message_classified",
 			slog.String("message_type", string(msgInfo.Type)),
 			slog.String("method", msgInfo.Method),
-			slog.Bool("is_discovery", isDiscovery),
 			slog.Bool("has_bearer_token", hasBearerToken),
 			slog.Bool("body_parseable", msgInfo.BodyParseable),
 		)
 
 		identity, err := m.authenticator.Authenticate(r.Context(), bearerToken)
 
-		// Opportunistic auth: if token is valid, inject identity even for discovery methods
 		if err == nil {
-			// Log opportunistic auth path when discovery method had valid token
-			if isDiscovery && hasBearerToken {
-				logging.Event(r.Context(), m.logger, slog.LevelDebug, "mcp.request_auth", "mcp-http", "opportunistic_auth",
-					slog.String("method", msgInfo.Method),
-					slog.String("message_type", string(msgInfo.Type)),
-				)
-			}
 			next.ServeHTTP(w, r.WithContext(app.WithAuthenticatedIdentity(r.Context(), identity)))
 			return
 		}
 
-		// If auth failed and method is allowed, bypass auth and proceed without identity
-		if isDiscovery && (errors.Is(err, app.ErrMissingBearerToken) || errors.Is(err, app.ErrInvalidBearerToken)) {
-			logging.Event(r.Context(), m.logger, slog.LevelDebug, "mcp.request_auth", "mcp-http", "auth_skipped_discovery",
-				slog.String("method", msgInfo.Method),
-				slog.String("message_type", string(msgInfo.Type)),
-			)
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		// All other cases: reject with appropriate error
+		// All unauthenticated or unauthorized requests: reject with appropriate error
 		status := http.StatusUnauthorized
 		if errors.Is(err, app.ErrUnauthorizedIdentity) || errors.Is(err, app.ErrEmailNotVerified) {
 			status = http.StatusForbidden
@@ -249,7 +219,6 @@ func (m MCPHTTPAuthMiddleware) Wrap(next http.Handler) http.Handler {
 			slog.String("reason", classifyRequestAuthReason(err)),
 			slog.String("method", msgInfo.Method),
 			slog.String("message_type", string(msgInfo.Type)),
-			slog.Bool("is_discovery", isDiscovery),
 			slog.Bool("body_parseable", msgInfo.BodyParseable),
 		)
 		http.Error(w, http.StatusText(status), status)

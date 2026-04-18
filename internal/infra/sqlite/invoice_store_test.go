@@ -672,6 +672,108 @@ func TestInvoiceStoreDelete_AlreadyGone(t *testing.T) {
 	}
 }
 
+func TestInvoiceStoreListByCustomer(t *testing.T) {
+	t.Parallel()
+
+	store, err := Open("")
+	if err != nil {
+		t.Fatalf("Open(): %v", err)
+	}
+	defer store.Close()
+
+	customerID, agreementID := seedCustomerAndAgreement(t, store)
+
+	// Create two time entries and two invoices
+	rate, _ := core.NewMoney(10000, "USD")
+
+	entry1 := &core.TimeEntry{
+		ID: "te_list_001", ServiceAgreementID: agreementID, CustomerProfileID: customerID,
+		Description: "Work A", Hours: mustHours(15000), Billable: true,
+		Date: time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := NewTimeEntryStore(store).Save(context.Background(), entry1); err != nil {
+		t.Fatalf("save entry1: %v", err)
+	}
+	line1, _ := core.NewInvoiceLine(core.InvoiceLineParams{InvoiceID: "inv_seed", ServiceAgreementID: agreementID, TimeEntryID: entry1.ID, UnitRate: rate})
+	inv1, _ := core.NewInvoice(core.InvoiceParams{CustomerID: customerID, Status: core.InvoiceStatusDraft, Currency: "USD", Lines: []core.InvoiceLine{line1}})
+	invStore := NewInvoiceStore(store)
+	if err := invStore.CreateDraft(context.Background(), &inv1, []*core.TimeEntry{entry1}); err != nil {
+		t.Fatalf("CreateDraft inv1: %v", err)
+	}
+
+	entry2 := &core.TimeEntry{
+		ID: "te_list_002", ServiceAgreementID: agreementID, CustomerProfileID: customerID,
+		Description: "Work B", Hours: mustHours(30000), Billable: true,
+		Date: time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := NewTimeEntryStore(store).Save(context.Background(), entry2); err != nil {
+		t.Fatalf("save entry2: %v", err)
+	}
+	line2, _ := core.NewInvoiceLine(core.InvoiceLineParams{InvoiceID: "inv_seed", ServiceAgreementID: agreementID, TimeEntryID: entry2.ID, UnitRate: rate})
+	inv2, _ := core.NewInvoice(core.InvoiceParams{CustomerID: customerID, Status: core.InvoiceStatusDraft, Currency: "USD", Lines: []core.InvoiceLine{line2}})
+	if err := invStore.CreateDraft(context.Background(), &inv2, []*core.TimeEntry{entry2}); err != nil {
+		t.Fatalf("CreateDraft inv2: %v", err)
+	}
+
+	// List all
+	summaries, err := invStore.ListByCustomer(context.Background(), customerID)
+	if err != nil {
+		t.Fatalf("ListByCustomer() error = %v", err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("len(summaries) = %d, want 2", len(summaries))
+	}
+	// grand_total = unit_rate_amount * hours / 10000
+	// entry1: 10000 * 15000 / 10000 = 15000; entry2: 10000 * 30000 / 10000 = 30000
+	totals := map[string]int64{}
+	for _, s := range summaries {
+		totals[s.ID] = s.GrandTotal
+	}
+	if totals[inv1.ID] != 15000 {
+		t.Fatalf("inv1 GrandTotal = %d, want 15000", totals[inv1.ID])
+	}
+	if totals[inv2.ID] != 30000 {
+		t.Fatalf("inv2 GrandTotal = %d, want 30000", totals[inv2.ID])
+	}
+
+	// List with status filter = draft → both
+	filtered, err := invStore.ListByCustomer(context.Background(), customerID, core.InvoiceStatusDraft)
+	if err != nil {
+		t.Fatalf("ListByCustomer(draft) error = %v", err)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("len(filtered) = %d, want 2", len(filtered))
+	}
+
+	// List with status filter = issued → none
+	issued, err := invStore.ListByCustomer(context.Background(), customerID, core.InvoiceStatusIssued)
+	if err != nil {
+		t.Fatalf("ListByCustomer(issued) error = %v", err)
+	}
+	if len(issued) != 0 {
+		t.Fatalf("len(issued) = %d, want 0", len(issued))
+	}
+}
+
+func TestInvoiceStoreListByCustomer_Empty(t *testing.T) {
+	t.Parallel()
+
+	store, err := Open("")
+	if err != nil {
+		t.Fatalf("Open(): %v", err)
+	}
+	defer store.Close()
+
+	invStore := NewInvoiceStore(store)
+	summaries, err := invStore.ListByCustomer(context.Background(), "cus_nonexistent")
+	if err != nil {
+		t.Fatalf("ListByCustomer() error = %v", err)
+	}
+	if summaries != nil && len(summaries) != 0 {
+		t.Fatalf("len(summaries) = %d, want 0", len(summaries))
+	}
+}
+
 func mustHours(amount int64) core.Hours {
 	h, err := core.NewHours(amount)
 	if err != nil {

@@ -107,7 +107,7 @@ func TestV1MCPRouteChallengesUnauthenticatedNonDiscoveryRequest(t *testing.T) {
 	}
 }
 
-func TestV1MCPRouteAllowsUnauthenticatedDiscoveryMethod(t *testing.T) {
+func TestV1MCPRouteChallengesUnauthenticatedInitialize(t *testing.T) {
 	t.Parallel()
 
 	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
@@ -128,20 +128,22 @@ func TestV1MCPRouteAllowsUnauthenticatedDiscoveryMethod(t *testing.T) {
 	httpServer := httptest.NewServer(mux)
 	defer httpServer.Close()
 
-	// Allowlisted method (initialize) should pass without authentication
+	// All unauthenticated requests including initialize MUST return 401 with WWW-Authenticate
 	resp, err := http.Post(httpServer.URL+"/v1/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"test","version":"1.0.0"},"capabilities":{}}}`))
 	if err != nil {
 		t.Fatalf("http.Post() error = %v", err)
 	}
 	defer resp.Body.Close()
 
-	// Discovery method should succeed without authentication
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+	}
+	if got := resp.Header.Get("WWW-Authenticate"); !strings.Contains(got, "Bearer") || !strings.Contains(got, "oauth-protected-resource") {
+		t.Fatalf("WWW-Authenticate = %q, want bearer challenge with resource_metadata", got)
 	}
 }
 
-func TestV1MCPRouteAllowsUnauthenticatedToolsListDiscovery(t *testing.T) {
+func TestV1MCPRouteChallengesUnauthenticatedToolsList(t *testing.T) {
 	t.Parallel()
 
 	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
@@ -162,23 +164,21 @@ func TestV1MCPRouteAllowsUnauthenticatedToolsListDiscovery(t *testing.T) {
 	httpServer := httptest.NewServer(mux)
 	defer httpServer.Close()
 
-	// Allowlisted method (tools/list) should pass authentication middleware without 401
-	// The MCP server may return 404 or other errors for protocol reasons (uninitialized session),
-	// but the request should NOT be rejected with 401 Unauthorized
 	resp, err := http.Post(httpServer.URL+"/v1/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
 	if err != nil {
 		t.Fatalf("http.Post() error = %v", err)
 	}
 	defer resp.Body.Close()
 
-	// Discovery method should NOT be rejected with 401 Unauthorized
-	if resp.StatusCode == http.StatusUnauthorized {
-		t.Fatalf("status = %d (Unauthorized), auth middleware should allow tools/list discovery without authentication", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d (all unauthenticated requests must return 401)", resp.StatusCode, http.StatusUnauthorized)
 	}
-	// 404 or other protocol errors are acceptable - auth allowed the request through
+	if got := resp.Header.Get("WWW-Authenticate"); !strings.Contains(got, "Bearer") {
+		t.Fatalf("WWW-Authenticate = %q, want bearer challenge", got)
+	}
 }
 
-func TestV1MCPRouteAllowsUnauthenticatedNotificationsInitializedDiscovery(t *testing.T) {
+func TestV1MCPRouteChallengesUnauthenticatedNotificationsInitialized(t *testing.T) {
 	t.Parallel()
 
 	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
@@ -199,20 +199,18 @@ func TestV1MCPRouteAllowsUnauthenticatedNotificationsInitializedDiscovery(t *tes
 	httpServer := httptest.NewServer(mux)
 	defer httpServer.Close()
 
-	// Allowlisted method (notifications/initialized) should pass authentication middleware without 401
-	// Note: notifications/initialized is a JSON-RPC notification (no id field, no response expected)
-	// The MCP server may return various status codes, but auth should NOT reject with 401
 	resp, err := http.Post(httpServer.URL+"/v1/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}`))
 	if err != nil {
 		t.Fatalf("http.Post() error = %v", err)
 	}
 	defer resp.Body.Close()
 
-	// Discovery notification should NOT be rejected with 401 Unauthorized
-	if resp.StatusCode == http.StatusUnauthorized {
-		t.Fatalf("status = %d (Unauthorized), auth middleware should allow notifications/initialized discovery without authentication", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d (all unauthenticated requests must return 401)", resp.StatusCode, http.StatusUnauthorized)
 	}
-	// Other status codes are acceptable - auth allowed the request through
+	if got := resp.Header.Get("WWW-Authenticate"); !strings.Contains(got, "Bearer") {
+		t.Fatalf("WWW-Authenticate = %q, want bearer challenge", got)
+	}
 }
 
 // Stub implementations
