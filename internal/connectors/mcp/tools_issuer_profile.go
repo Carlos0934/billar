@@ -7,34 +7,33 @@ import (
 	"strings"
 
 	"github.com/Carlos0934/billar/internal/app"
-	"github.com/Carlos0934/billar/internal/infra/logging"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 )
 
-func registerIssuerProfileTools(server *mcpsrv.MCPServer, service IssuerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) []string {
+func registerIssuerProfileTools(server *mcpsrv.MCPServer, service IssuerProfileWriteProvider, logger *slog.Logger) []string {
 	registered := make([]string, 0, 4)
 
-	tool, handler := issuerProfileCreateTool(service, guard, logger)
+	tool, handler := issuerProfileCreateTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = issuerProfileGetTool(service, guard, logger)
+	tool, handler = issuerProfileGetTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = issuerProfileUpdateTool(service, guard, logger)
+	tool, handler = issuerProfileUpdateTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = issuerProfileDeleteTool(service, guard, logger)
+	tool, handler = issuerProfileDeleteTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
 	return registered
 }
 
-func issuerProfileCreateTool(service IssuerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func issuerProfileCreateTool(service IssuerProfileWriteProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("issuer_profile.create",
 		mcp.WithDescription(`Create a new issuer profile.
 
@@ -99,10 +98,6 @@ OPTIONAL FIELDS:
 		if service == nil {
 			return mcp.NewToolResultError("issuer profile service is required"), nil
 		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "issuer_profile.create", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
-		}
 
 		var input IssuerProfileCreateInput
 		if err := req.BindArguments(&input); err != nil {
@@ -118,7 +113,7 @@ OPTIONAL FIELDS:
 	}
 }
 
-func issuerProfileGetTool(service IssuerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func issuerProfileGetTool(service IssuerProfileWriteProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("issuer_profile.get",
 		mcp.WithDescription("Get an issuer profile by ID"),
 		mcp.WithString("id",
@@ -129,10 +124,6 @@ func issuerProfileGetTool(service IssuerProfileWriteProvider, guard IngressGuard
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("issuer profile service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "issuer_profile.get", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		id := strings.TrimSpace(req.GetString("id", ""))
@@ -149,7 +140,7 @@ func issuerProfileGetTool(service IssuerProfileWriteProvider, guard IngressGuard
 	}
 }
 
-func issuerProfileUpdateTool(service IssuerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func issuerProfileUpdateTool(service IssuerProfileWriteProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("issuer_profile.update",
 		mcp.WithDescription(`Update an existing issuer profile with partial patch.
 
@@ -205,10 +196,6 @@ are cascaded to the linked legal entity when provided.`),
 		if service == nil {
 			return mcp.NewToolResultError("issuer profile service is required"), nil
 		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "issuer_profile.update", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
-		}
 
 		var input IssuerProfileUpdateInput
 		if err := req.BindArguments(&input); err != nil {
@@ -229,7 +216,7 @@ are cascaded to the linked legal entity when provided.`),
 	}
 }
 
-func issuerProfileDeleteTool(service IssuerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func issuerProfileDeleteTool(service IssuerProfileWriteProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("issuer_profile.delete",
 		mcp.WithDescription("Delete an issuer profile"),
 		mcp.WithString("id",
@@ -240,10 +227,6 @@ func issuerProfileDeleteTool(service IssuerProfileWriteProvider, guard IngressGu
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("issuer profile service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "issuer_profile.delete", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		id := strings.TrimSpace(req.GetString("id", ""))

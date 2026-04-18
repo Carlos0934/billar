@@ -10,7 +10,7 @@ func TestNewServerRegistersSessionTools(t *testing.T) {
 	session := &sessionServiceStub{}
 	issuer := &issuerProfileServiceStub{}
 	customer := &customerProfileWriteServiceStub{}
-	server := NewServer(session, issuer, customer, nil, nil, nil, NewIngressGuard(nil), nil)
+	server := NewServer(session, issuer, customer, nil, nil, nil, nil)
 	if server == nil {
 		t.Fatal("NewServer() returned nil")
 	}

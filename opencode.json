@@ -4,10 +4,9 @@
     "billar": {
       "type": "remote",
       "url": "http://127.0.0.1:8080/v1/mcp",
-      "oauth": {
-        "scope": "tools:read tools:execute"
-      },
-      "command": ["go", "run", "./cmd/mcp"]
+      "headers": {
+        "Authorization": "Bearer e123b7a7c4e0543eabd12e916e37cda286f69d4fc39634703e5af2c2ff3bb04a"
+      }
     }
   }
 }

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Carlos0934/billar/internal/app"
-	"github.com/Carlos0934/billar/internal/infra/logging"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 )
@@ -23,37 +22,37 @@ type TimeEntryServiceProvider interface {
 	ListUnbilled(ctx context.Context, customerID string) ([]app.TimeEntryDTO, error)
 }
 
-func registerTimeEntryTools(server *mcpsrv.MCPServer, service TimeEntryServiceProvider, guard IngressGuard, logger *slog.Logger) []string {
+func registerTimeEntryTools(server *mcpsrv.MCPServer, service TimeEntryServiceProvider, logger *slog.Logger) []string {
 	registered := make([]string, 0, 6)
 
-	tool, handler := timeEntryRecordTool(service, guard, logger)
+	tool, handler := timeEntryRecordTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = timeEntryGetTool(service, guard, logger)
+	tool, handler = timeEntryGetTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = timeEntryUpdateTool(service, guard, logger)
+	tool, handler = timeEntryUpdateTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = timeEntryDeleteTool(service, guard, logger)
+	tool, handler = timeEntryDeleteTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = timeEntryListTool(service, guard, logger)
+	tool, handler = timeEntryListTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = timeEntryListUnbilledTool(service, guard, logger)
+	tool, handler = timeEntryListUnbilledTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
 	return registered
 }
 
-func timeEntryRecordTool(service TimeEntryServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func timeEntryRecordTool(service TimeEntryServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("time_entry.record",
 		mcp.WithDescription(`Record a new time entry for a customer.
 
@@ -91,10 +90,6 @@ REQUIRED FIELDS:
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("time entry service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "time_entry.record", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		customerProfileID := strings.TrimSpace(req.GetString("customer_profile_id", ""))
@@ -144,7 +139,7 @@ REQUIRED FIELDS:
 	}
 }
 
-func timeEntryGetTool(service TimeEntryServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func timeEntryGetTool(service TimeEntryServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("time_entry.get",
 		mcp.WithDescription("Get a time entry by ID"),
 		mcp.WithString("id",
@@ -156,10 +151,6 @@ func timeEntryGetTool(service TimeEntryServiceProvider, guard IngressGuard, logg
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("time entry service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "time_entry.get", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		id := strings.TrimSpace(req.GetString("id", ""))
@@ -176,7 +167,7 @@ func timeEntryGetTool(service TimeEntryServiceProvider, guard IngressGuard, logg
 	}
 }
 
-func timeEntryUpdateTool(service TimeEntryServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func timeEntryUpdateTool(service TimeEntryServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("time_entry.update",
 		mcp.WithDescription("Update the description and/or hours of an existing time entry"),
 		mcp.WithString("id",
@@ -194,10 +185,6 @@ func timeEntryUpdateTool(service TimeEntryServiceProvider, guard IngressGuard, l
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("time entry service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "time_entry.update", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		var input UpdateTimeEntryInput
@@ -219,7 +206,7 @@ func timeEntryUpdateTool(service TimeEntryServiceProvider, guard IngressGuard, l
 	}
 }
 
-func timeEntryDeleteTool(service TimeEntryServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func timeEntryDeleteTool(service TimeEntryServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("time_entry.delete",
 		mcp.WithDescription("Delete a time entry by ID"),
 		mcp.WithString("id",
@@ -231,10 +218,6 @@ func timeEntryDeleteTool(service TimeEntryServiceProvider, guard IngressGuard, l
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("time entry service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "time_entry.delete", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		id := strings.TrimSpace(req.GetString("id", ""))
@@ -250,7 +233,7 @@ func timeEntryDeleteTool(service TimeEntryServiceProvider, guard IngressGuard, l
 	}
 }
 
-func timeEntryListTool(service TimeEntryServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func timeEntryListTool(service TimeEntryServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("time_entry.list_by_customer_profile",
 		mcp.WithDescription("List all time entries for a given customer profile"),
 		mcp.WithString("customer_profile_id",
@@ -262,10 +245,6 @@ func timeEntryListTool(service TimeEntryServiceProvider, guard IngressGuard, log
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("time entry service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "time_entry.list_by_customer_profile", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		customerProfileID := strings.TrimSpace(req.GetString("customer_profile_id", ""))
@@ -282,7 +261,7 @@ func timeEntryListTool(service TimeEntryServiceProvider, guard IngressGuard, log
 	}
 }
 
-func timeEntryListUnbilledTool(service TimeEntryServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func timeEntryListUnbilledTool(service TimeEntryServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("time_entry.list_unbilled",
 		mcp.WithDescription("List all unbilled time entries for a given customer profile"),
 		mcp.WithString("customer_profile_id",
@@ -294,10 +273,6 @@ func timeEntryListUnbilledTool(service TimeEntryServiceProvider, guard IngressGu
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("time entry service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "time_entry.list_unbilled", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		customerProfileID := strings.TrimSpace(req.GetString("customer_profile_id", ""))

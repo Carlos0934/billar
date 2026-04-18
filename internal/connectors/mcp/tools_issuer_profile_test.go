@@ -59,7 +59,7 @@ func TestIssuerProfileCreateToolHandlers_BillingAddress(t *testing.T) {
 		},
 	}
 
-	_, handler := issuerProfileCreateTool(svc, NewIngressGuard(nil), nil)
+	_, handler := issuerProfileCreateTool(svc, nil)
 	result, err := handler(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name: "issuer_profile.create",
@@ -148,7 +148,7 @@ func TestIssuerProfileUpdateToolHandlers_PatchPointerSemantics(t *testing.T) {
 			svc := &issuerProfileServiceStub{
 				updateRes: app.IssuerProfileDTO{ID: "iss_123", LegalEntityID: "le_456"},
 			}
-			_, handler := issuerProfileUpdateTool(svc, NewIngressGuard(nil), nil)
+			_, handler := issuerProfileUpdateTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "issuer_profile.update", Arguments: tc.arguments},
 			})
@@ -243,7 +243,7 @@ func TestIssuerProfileCreateToolHandlers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, handler := issuerProfileCreateTool(tc.service, NewIngressGuard(nil), nil)
+			_, handler := issuerProfileCreateTool(tc.service, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "issuer_profile.create", Arguments: tc.arguments},
 			})
@@ -318,7 +318,7 @@ func TestIssuerProfileDeleteToolHandlers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, handler := issuerProfileDeleteTool(tc.service, NewIngressGuard(nil), nil)
+			_, handler := issuerProfileDeleteTool(tc.service, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "issuer_profile.delete", Arguments: tc.arguments},
 			})
@@ -407,7 +407,7 @@ func TestIssuerProfileUpdateToolHandlers_LEFields(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, handler := issuerProfileUpdateTool(tc.service, NewIngressGuard(nil), nil)
+			_, handler := issuerProfileUpdateTool(tc.service, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "issuer_profile.update", Arguments: tc.arguments},
 			})
@@ -492,7 +492,7 @@ func TestIssuerProfileUpdateToolHandlers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, handler := issuerProfileUpdateTool(tc.service, NewIngressGuard(nil), nil)
+			_, handler := issuerProfileUpdateTool(tc.service, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "issuer_profile.update", Arguments: tc.arguments},
 			})

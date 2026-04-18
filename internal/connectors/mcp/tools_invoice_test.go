@@ -110,7 +110,7 @@ func TestInvoiceDraftToolHandler(t *testing.T) {
 			if tc.service != nil {
 				svc = tc.service
 			}
-			_, handler := invoiceDraftTool(svc, NewIngressGuard(nil), nil)
+			_, handler := invoiceDraftTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "invoice.draft", Arguments: tc.arguments},
 			})
@@ -185,7 +185,7 @@ func TestInvoiceIssueToolHandler(t *testing.T) {
 			if tc.service != nil {
 				svc = tc.service
 			}
-			_, handler := invoiceIssueTool(svc, NewIngressGuard(nil), nil)
+			_, handler := invoiceIssueTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "invoice.issue", Arguments: tc.arguments},
 			})
@@ -268,7 +268,7 @@ func TestInvoiceDiscardToolHandler(t *testing.T) {
 			if tc.service != nil {
 				svc = tc.service
 			}
-			_, handler := invoiceDiscardTool(svc, NewIngressGuard(nil), nil)
+			_, handler := invoiceDiscardTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "invoice.discard", Arguments: tc.arguments},
 			})
@@ -308,7 +308,7 @@ func TestInvoiceGetToolHandler_StructuredDTO(t *testing.T) {
 		Subtotal: 15000, GrandTotal: 15000,
 	}
 	svc := &invoiceServiceStub{getInvoiceRes: wantDTO}
-	_, handler := invoiceGetTool(svc, NewIngressGuard(nil), nil)
+	_, handler := invoiceGetTool(svc, nil)
 	result, err := handler(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Name: "invoice.get", Arguments: map[string]any{"id": "inv_abc"}},
 	})
@@ -412,7 +412,7 @@ func TestInvoiceGetToolHandler(t *testing.T) {
 			if tc.service != nil {
 				svc = tc.service
 			}
-			_, handler := invoiceGetTool(svc, NewIngressGuard(nil), nil)
+			_, handler := invoiceGetTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "invoice.get", Arguments: tc.arguments},
 			})
@@ -449,7 +449,7 @@ func TestInvoiceListToolHandler_StructuredDTO(t *testing.T) {
 		{ID: "inv_002", InvoiceNumber: "", CustomerID: "cus_1", Status: "draft", Currency: "USD", GrandTotal: 15000},
 	}
 	svc := &invoiceServiceStub{listInvoicesRes: summaries}
-	_, handler := invoiceListTool(svc, NewIngressGuard(nil), nil)
+	_, handler := invoiceListTool(svc, nil)
 	result, err := handler(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Name: "invoice.list", Arguments: map[string]any{"customer_profile_id": "cus_1"}},
 	})
@@ -497,7 +497,7 @@ func TestInvoiceListToolHandler_EmptyStructuredDTO(t *testing.T) {
 	t.Parallel()
 
 	svc := &invoiceServiceStub{listInvoicesRes: nil}
-	_, handler := invoiceListTool(svc, NewIngressGuard(nil), nil)
+	_, handler := invoiceListTool(svc, nil)
 	result, err := handler(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Name: "invoice.list", Arguments: map[string]any{"customer_profile_id": "cus_999"}},
 	})
@@ -577,7 +577,7 @@ func TestInvoiceListToolHandler(t *testing.T) {
 			if tc.service != nil {
 				svc = tc.service
 			}
-			_, handler := invoiceListTool(svc, NewIngressGuard(nil), nil)
+			_, handler := invoiceListTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "invoice.list", Arguments: tc.arguments},
 			})

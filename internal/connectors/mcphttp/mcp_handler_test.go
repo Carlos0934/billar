@@ -15,23 +15,25 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+const testAPIKey = "test-api-key-for-mcp-handler"
+
+func newTestMCPServer() *mcpconnector.Server {
+	return mcpconnector.NewServer(
+		app.NewRequestSessionService(app.ContextIdentitySource{}),
+		issuerProfileProviderStub{},
+		customerProfileProviderStub{},
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+}
+
 func TestV1MCPRouteUsesConnectorAuthenticatedIdentity(t *testing.T) {
 	t.Parallel()
 
-	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
 	mux := http.NewServeMux()
-	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{identity: app.AuthenticatedIdentity{Email: "person@example.com", EmailVerified: true}}, challenge, nil).Wrap(
-		mcpconnector.NewServer(
-			app.NewRequestSessionService(app.ContextIdentitySource{}),
-			issuerProfileProviderStub{},
-			customerProfileProviderStub{},
-			nil,
-			nil,
-			nil,
-			mcpconnector.NewIngressGuard(nil),
-			nil,
-		).HTTPHandler(),
-	))
+	mux.Handle("/v1/mcp", NewAPIKeyAuthMiddleware([]string{testAPIKey}, nil).Wrap(newTestMCPServer().HTTPHandler()))
 
 	httpServer := httptest.NewServer(mux)
 	defer httpServer.Close()
@@ -39,7 +41,7 @@ func TestV1MCPRouteUsesConnectorAuthenticatedIdentity(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	httpTransport, err := transport.NewStreamableHTTP(httpServer.URL+"/v1/mcp", transport.WithHTTPHeaders(map[string]string{"Authorization": "Bearer token-123"}))
+	httpTransport, err := transport.NewStreamableHTTP(httpServer.URL+"/v1/mcp", transport.WithHTTPHeaders(map[string]string{"Authorization": "Bearer " + testAPIKey}))
 	if err != nil {
 		t.Fatalf("NewStreamableHTTP() error = %v", err)
 	}
@@ -66,33 +68,25 @@ func TestV1MCPRouteUsesConnectorAuthenticatedIdentity(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("CallTool(session.status) returned tool error: %+v", result)
 	}
-	if got := mcp.GetTextFromContent(result.Content[0]); got != "Status: active\nEmail: person@example.com\nEmail verified: true\n" {
-		t.Fatalf("CallTool(session.status) text = %q", got)
+	// With API key auth, synthetic identity fields are hidden; only status is shown.
+	got := mcp.GetTextFromContent(result.Content[0])
+	if !strings.Contains(got, "Status: active") {
+		t.Fatalf("CallTool(session.status) text = %q, want to contain \"Status: active\"", got)
+	}
+	if strings.Contains(got, "mcp@local") || strings.Contains(got, "mcp-api-key") || strings.Contains(got, "billar://local") {
+		t.Fatalf("CallTool(session.status) text = %q, synthetic identity fields must be hidden", got)
 	}
 }
 
 func TestV1MCPRouteChallengesUnauthenticatedNonDiscoveryRequest(t *testing.T) {
 	t.Parallel()
 
-	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
 	mux := http.NewServeMux()
-	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{err: app.ErrMissingBearerToken}, challenge, nil).Wrap(
-		mcpconnector.NewServer(
-			app.NewRequestSessionService(app.ContextIdentitySource{}),
-			issuerProfileProviderStub{},
-			customerProfileProviderStub{},
-			nil,
-			nil,
-			nil,
-			mcpconnector.NewIngressGuard(nil),
-			nil,
-		).HTTPHandler(),
-	))
+	mux.Handle("/v1/mcp", NewAPIKeyAuthMiddleware([]string{testAPIKey}, nil).Wrap(newTestMCPServer().HTTPHandler()))
 
 	httpServer := httptest.NewServer(mux)
 	defer httpServer.Close()
 
-	// Use a non-allowlisted method (tools/call) to test authentication challenge
 	resp, err := http.Post(httpServer.URL+"/v1/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"session.status"}}`))
 	if err != nil {
 		t.Fatalf("http.Post() error = %v", err)
@@ -102,33 +96,17 @@ func TestV1MCPRouteChallengesUnauthenticatedNonDiscoveryRequest(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
 	}
-	if got := resp.Header.Get("WWW-Authenticate"); !strings.Contains(got, "Bearer") || !strings.Contains(got, "oauth-protected-resource") {
-		t.Fatalf("WWW-Authenticate = %q, want bearer challenge with metadata", got)
-	}
 }
 
 func TestV1MCPRouteChallengesUnauthenticatedInitialize(t *testing.T) {
 	t.Parallel()
 
-	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
 	mux := http.NewServeMux()
-	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{err: app.ErrMissingBearerToken}, challenge, nil).Wrap(
-		mcpconnector.NewServer(
-			app.NewRequestSessionService(app.ContextIdentitySource{}),
-			issuerProfileProviderStub{},
-			customerProfileProviderStub{},
-			nil,
-			nil,
-			nil,
-			mcpconnector.NewIngressGuard(nil),
-			nil,
-		).HTTPHandler(),
-	))
+	mux.Handle("/v1/mcp", NewAPIKeyAuthMiddleware([]string{testAPIKey}, nil).Wrap(newTestMCPServer().HTTPHandler()))
 
 	httpServer := httptest.NewServer(mux)
 	defer httpServer.Close()
 
-	// All unauthenticated requests including initialize MUST return 401 with WWW-Authenticate
 	resp, err := http.Post(httpServer.URL+"/v1/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"test","version":"1.0.0"},"capabilities":{}}}`))
 	if err != nil {
 		t.Fatalf("http.Post() error = %v", err)
@@ -138,28 +116,13 @@ func TestV1MCPRouteChallengesUnauthenticatedInitialize(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
 	}
-	if got := resp.Header.Get("WWW-Authenticate"); !strings.Contains(got, "Bearer") || !strings.Contains(got, "oauth-protected-resource") {
-		t.Fatalf("WWW-Authenticate = %q, want bearer challenge with resource_metadata", got)
-	}
 }
 
 func TestV1MCPRouteChallengesUnauthenticatedToolsList(t *testing.T) {
 	t.Parallel()
 
-	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
 	mux := http.NewServeMux()
-	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{err: app.ErrMissingBearerToken}, challenge, nil).Wrap(
-		mcpconnector.NewServer(
-			app.NewRequestSessionService(app.ContextIdentitySource{}),
-			issuerProfileProviderStub{},
-			customerProfileProviderStub{},
-			nil,
-			nil,
-			nil,
-			mcpconnector.NewIngressGuard(nil),
-			nil,
-		).HTTPHandler(),
-	))
+	mux.Handle("/v1/mcp", NewAPIKeyAuthMiddleware([]string{testAPIKey}, nil).Wrap(newTestMCPServer().HTTPHandler()))
 
 	httpServer := httptest.NewServer(mux)
 	defer httpServer.Close()
@@ -173,28 +136,13 @@ func TestV1MCPRouteChallengesUnauthenticatedToolsList(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d (all unauthenticated requests must return 401)", resp.StatusCode, http.StatusUnauthorized)
 	}
-	if got := resp.Header.Get("WWW-Authenticate"); !strings.Contains(got, "Bearer") {
-		t.Fatalf("WWW-Authenticate = %q, want bearer challenge", got)
-	}
 }
 
 func TestV1MCPRouteChallengesUnauthenticatedNotificationsInitialized(t *testing.T) {
 	t.Parallel()
 
-	challenge := app.OAuthChallengeDTO{ResourceURI: "https://resource.example", AuthorizationServers: []string{"https://issuer.example"}}
 	mux := http.NewServeMux()
-	mux.Handle("/v1/mcp", NewMCPHTTPAuthMiddleware(&requestAuthenticatorStub{err: app.ErrMissingBearerToken}, challenge, nil).Wrap(
-		mcpconnector.NewServer(
-			app.NewRequestSessionService(app.ContextIdentitySource{}),
-			issuerProfileProviderStub{},
-			customerProfileProviderStub{},
-			nil,
-			nil,
-			nil,
-			mcpconnector.NewIngressGuard(nil),
-			nil,
-		).HTTPHandler(),
-	))
+	mux.Handle("/v1/mcp", NewAPIKeyAuthMiddleware([]string{testAPIKey}, nil).Wrap(newTestMCPServer().HTTPHandler()))
 
 	httpServer := httptest.NewServer(mux)
 	defer httpServer.Close()
@@ -207,9 +155,6 @@ func TestV1MCPRouteChallengesUnauthenticatedNotificationsInitialized(t *testing.
 
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d (all unauthenticated requests must return 401)", resp.StatusCode, http.StatusUnauthorized)
-	}
-	if got := resp.Header.Get("WWW-Authenticate"); !strings.Contains(got, "Bearer") {
-		t.Fatalf("WWW-Authenticate = %q, want bearer challenge", got)
 	}
 }
 

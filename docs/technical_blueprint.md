@@ -70,10 +70,9 @@ The main objective is to support a reliable hourly billing flow with a clean int
 ### Access model
 
 * Single local operator
-* OAuth/OIDC-based authentication
-* Allow access by exact email allowlist and allowed email domains
+* API key authentication for MCP HTTP (Bearer token, validated in middleware)
 * MCP HTTP protected operations require bearer-authenticated request identity
-* CLI and stdio may use an explicit local identity bypass for protected operations when configured
+* CLI uses a local identity constructed at startup; no allowlist enforcement
 
 ### Billing model
 
@@ -182,7 +181,7 @@ Includes:
 
 * SQLite access
 * repositories/store layer
-* OAuth/OIDC integration
+* API key auth (MCP HTTP)
 * PDF renderer
 * config loading
 
@@ -383,9 +382,8 @@ Represents current access state.
 ### Rules
 
 * no protected operation before authenticated identity is present
-* MCP HTTP requires valid bearer-authenticated OAuth/OIDC identity on each request
-* only allowed emails or allowed domains can access protected operations
-* CLI and stdio protected operations may use an explicit local bypass identity for local execution
+* MCP HTTP requires valid bearer-authenticated API key identity on each request
+* CLI constructs a local identity at startup; protected operations receive it automatically
 
 ---
 
@@ -819,14 +817,11 @@ billar invoice pdf --id <id>
 ### Rule
 
 MCP and CLI both call application services.
-Neither should depend directly on SQLite, OAuth internals, or PDF libraries.
-OAuth callback handling is HTTP-only and does not belong in the MCP tool surface.
+Neither should depend directly on SQLite or PDF libraries.
 The HTTP MCP transport is exposed from the auth HTTP server at `/v1/mcp`.
-Authentication for MCP-capable clients is owned by the client, not by Billar tools.
+Authentication for MCP-capable clients is owned by the Bearer API key middleware.
 The current MCP session surface keeps only `session.status` for session inspection.
-Stdio remains available as a technical development and testing transport, not as the real interactive authentication UX.
 Early MCP bootstrap may include deterministic connector-level tools such as `hello_world` while the application surface is still growing.
-For MCP ingress, exact email allowlist or allowed domain remains required, and IP allowlisting is optional by config.
 
 ---
 
@@ -912,10 +907,10 @@ These are candidate libraries, not hard requirements.
 * `net/http`
 * `github.com/go-chi/chi/v5`
 
-### OAuth / OIDC
+### OAuth / OIDC (removed from MCP HTTP path)
 
-* `github.com/coreos/go-oidc`
-* `golang.org/x/oauth2`
+* ~~`github.com/coreos/go-oidc`~~ — no longer used for MCP HTTP auth
+* ~~`golang.org/x/oauth2`~~ — no longer used for MCP HTTP auth
 
 ### SQLite
 
@@ -953,7 +948,7 @@ Fallback if direct drawing is needed:
 
 Build the first end-to-end billing loop:
 
-1. authenticate with a compatible MCP client or local CLI bypass
+1. authenticate via Bearer API key (MCP HTTP) or use local CLI identity
 2. establish authenticated access context
 3. create legal entity for the issuer
 4. configure issuer profile
@@ -993,9 +988,9 @@ Do not add yet:
 3. final PDF rendering library
 4. invoice grouping policy for time entries
 5. whether time entry editing is allowed after draft creation but before issue
-6. exact OAuth provider choice
+6. ~~exact OAuth provider choice~~ → **Resolved**: MCP HTTP uses Bearer API key auth; CLI uses a local identity at startup.
 
-Development default for the first runnable auth surface: Google OIDC with a loopback HTTP callback.
+Development default for the first runnable auth surface: Bearer API key for MCP HTTP; local identity for CLI.
 
 ---
 
@@ -1015,11 +1010,9 @@ Development default for the first runnable auth surface: Google OIDC with a loop
 
 ### Access
 
-* OAuth/OIDC login required
-* allow exact email matches and allowed domains
-* MCP may additionally enforce optional ingress IP allowlists by config
-* MCP clients own their interactive auth flow; Billar only verifies bearer tokens and exposes protected-resource metadata on HTTP
-* CLI and stdio do not use a session runtime; protected operations may opt into a local explicit bypass identity
+* API key authentication for MCP HTTP (Bearer token)
+* MCP clients authenticate via Bearer API key; Billar middleware validates and injects identity
+* CLI uses a local identity at startup
 * single operator scope for now
 
 ### Invoice generation
@@ -1054,7 +1047,6 @@ The minimum viable stack is:
 * Go
 * SQLite
 * Chi or net/http
-* go-oidc + oauth2
 * HTML-to-PDF renderer
 
 This is enough to build the first serious version without forcing full DDD ceremony or premature infrastructure complexity.

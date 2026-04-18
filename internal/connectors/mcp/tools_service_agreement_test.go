@@ -142,7 +142,7 @@ func TestServiceAgreementCreateToolHandlers(t *testing.T) {
 			if tc.service != nil {
 				svc = tc.service
 			}
-			_, handler := serviceAgreementCreateTool(svc, NewIngressGuard(nil), nil)
+			_, handler := serviceAgreementCreateTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "service_agreement.create", Arguments: tc.arguments},
 			})
@@ -249,7 +249,7 @@ func TestServiceAgreementGetToolHandlers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, handler := serviceAgreementGetTool(tc.service, NewIngressGuard(nil), nil)
+			_, handler := serviceAgreementGetTool(tc.service, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "service_agreement.get", Arguments: tc.arguments},
 			})
@@ -341,7 +341,7 @@ func TestServiceAgreementListByCustomerProfileToolHandlers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, handler := serviceAgreementListTool(tc.service, NewIngressGuard(nil), nil)
+			_, handler := serviceAgreementListTool(tc.service, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "service_agreement.list_by_customer_profile", Arguments: tc.arguments},
 			})
@@ -429,7 +429,7 @@ func TestServiceAgreementUpdateRateToolHandlers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, handler := serviceAgreementUpdateRateTool(tc.service, NewIngressGuard(nil), nil)
+			_, handler := serviceAgreementUpdateRateTool(tc.service, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "service_agreement.update_rate", Arguments: tc.arguments},
 			})
@@ -520,7 +520,7 @@ func TestServiceAgreementActivateToolHandlers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, handler := serviceAgreementActivateTool(tc.service, NewIngressGuard(nil), nil)
+			_, handler := serviceAgreementActivateTool(tc.service, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Arguments: tc.arguments},
 			})
@@ -593,7 +593,7 @@ func TestServiceAgreementDeactivateToolHandlers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, handler := serviceAgreementDeactivateTool(tc.service, NewIngressGuard(nil), nil)
+			_, handler := serviceAgreementDeactivateTool(tc.service, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Arguments: tc.arguments},
 			})
@@ -647,7 +647,7 @@ func TestServiceAgreementCreateToolHandlers_AllFields(t *testing.T) {
 		},
 	}
 
-	_, handler := serviceAgreementCreateTool(svc, NewIngressGuard(nil), nil)
+	_, handler := serviceAgreementCreateTool(svc, nil)
 	result, err := handler(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name: "service_agreement.create",
@@ -706,7 +706,7 @@ func TestServiceAgreementUpdateRateToolHandlers_Int64Binding(t *testing.T) {
 			svc := &agreementServiceStub{
 				updateRateRes: app.ServiceAgreementDTO{ID: "sa_rate", HourlyRate: tc.wantRate, Currency: "USD"},
 			}
-			_, handler := serviceAgreementUpdateRateTool(svc, NewIngressGuard(nil), nil)
+			_, handler := serviceAgreementUpdateRateTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{
 					Name:      "service_agreement.update_rate",
@@ -726,33 +726,5 @@ func TestServiceAgreementUpdateRateToolHandlers_Int64Binding(t *testing.T) {
 				t.Errorf("HourlyRate = %d, want %d", svc.updateRateArg.HourlyRate, tc.wantRate)
 			}
 		})
-	}
-}
-
-// -- ingress guard for service agreement tools --
-
-func TestServiceAgreementToolsBlockUnauthorizedRequest(t *testing.T) {
-	t.Parallel()
-
-	guard := NewIngressGuard([]string{"127.0.0.1"})
-	service := &agreementServiceStub{
-		createRes: app.ServiceAgreementDTO{ID: "sa_123"},
-	}
-
-	_, handler := serviceAgreementCreateTool(service, guard, nil)
-	result, err := handler(context.Background(), mcp.CallToolRequest{
-		Header: headerWithValues(map[string]string{
-			"X-Forwarded-For": "10.0.0.99",
-		}),
-		Params: mcp.CallToolParams{
-			Name:      "service_agreement.create",
-			Arguments: map[string]any{"customer_profile_id": "cus_456"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
-	if result == nil || !result.IsError {
-		t.Fatalf("handler result = %+v, want error result for unauthorized IP", result)
 	}
 }

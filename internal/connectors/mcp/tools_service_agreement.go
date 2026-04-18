@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/Carlos0934/billar/internal/app"
-	"github.com/Carlos0934/billar/internal/infra/logging"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 )
@@ -22,37 +21,37 @@ type AgreementServiceProvider interface {
 	Deactivate(ctx context.Context, id string) (app.ServiceAgreementDTO, error)
 }
 
-func registerServiceAgreementTools(server *mcpsrv.MCPServer, service AgreementServiceProvider, guard IngressGuard, logger *slog.Logger) []string {
+func registerServiceAgreementTools(server *mcpsrv.MCPServer, service AgreementServiceProvider, logger *slog.Logger) []string {
 	registered := make([]string, 0, 6)
 
-	tool, handler := serviceAgreementCreateTool(service, guard, logger)
+	tool, handler := serviceAgreementCreateTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = serviceAgreementGetTool(service, guard, logger)
+	tool, handler = serviceAgreementGetTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = serviceAgreementListTool(service, guard, logger)
+	tool, handler = serviceAgreementListTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = serviceAgreementUpdateRateTool(service, guard, logger)
+	tool, handler = serviceAgreementUpdateRateTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = serviceAgreementActivateTool(service, guard, logger)
+	tool, handler = serviceAgreementActivateTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = serviceAgreementDeactivateTool(service, guard, logger)
+	tool, handler = serviceAgreementDeactivateTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
 	return registered
 }
 
-func serviceAgreementCreateTool(service AgreementServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func serviceAgreementCreateTool(service AgreementServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("service_agreement.create",
 		mcp.WithDescription(`Create a new service agreement for a customer profile.
 
@@ -92,10 +91,6 @@ REQUIRED FIELDS:
 		if service == nil {
 			return mcp.NewToolResultError("service agreement service is required"), nil
 		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "service_agreement.create", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
-		}
 
 		var input ServiceAgreementCreateInput
 		if err := req.BindArguments(&input); err != nil {
@@ -115,7 +110,7 @@ REQUIRED FIELDS:
 	}
 }
 
-func serviceAgreementGetTool(service AgreementServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func serviceAgreementGetTool(service AgreementServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("service_agreement.get",
 		mcp.WithDescription("Get a service agreement by ID"),
 		mcp.WithString("id",
@@ -126,10 +121,6 @@ func serviceAgreementGetTool(service AgreementServiceProvider, guard IngressGuar
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("service agreement service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "service_agreement.get", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		id := strings.TrimSpace(req.GetString("id", ""))
@@ -146,7 +137,7 @@ func serviceAgreementGetTool(service AgreementServiceProvider, guard IngressGuar
 	}
 }
 
-func serviceAgreementListTool(service AgreementServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func serviceAgreementListTool(service AgreementServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("service_agreement.list_by_customer_profile",
 		mcp.WithDescription("List all service agreements for a given customer profile"),
 		mcp.WithString("customer_profile_id",
@@ -157,10 +148,6 @@ func serviceAgreementListTool(service AgreementServiceProvider, guard IngressGua
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("service agreement service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "service_agreement.list_by_customer_profile", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		customerProfileID := strings.TrimSpace(req.GetString("customer_profile_id", ""))
@@ -177,7 +164,7 @@ func serviceAgreementListTool(service AgreementServiceProvider, guard IngressGua
 	}
 }
 
-func serviceAgreementUpdateRateTool(service AgreementServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func serviceAgreementUpdateRateTool(service AgreementServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("service_agreement.update_rate",
 		mcp.WithDescription("Update the hourly rate of an existing service agreement"),
 		mcp.WithString("id",
@@ -192,10 +179,6 @@ func serviceAgreementUpdateRateTool(service AgreementServiceProvider, guard Ingr
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("service agreement service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "service_agreement.update_rate", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		var input ServiceAgreementUpdateRateInput
@@ -217,7 +200,7 @@ func serviceAgreementUpdateRateTool(service AgreementServiceProvider, guard Ingr
 	}
 }
 
-func serviceAgreementActivateTool(service AgreementServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func serviceAgreementActivateTool(service AgreementServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("service_agreement.activate",
 		mcp.WithDescription("Activate a service agreement"),
 		mcp.WithString("id",
@@ -228,10 +211,6 @@ func serviceAgreementActivateTool(service AgreementServiceProvider, guard Ingres
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("service agreement service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "service_agreement.activate", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		id := strings.TrimSpace(req.GetString("id", ""))
@@ -248,7 +227,7 @@ func serviceAgreementActivateTool(service AgreementServiceProvider, guard Ingres
 	}
 }
 
-func serviceAgreementDeactivateTool(service AgreementServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func serviceAgreementDeactivateTool(service AgreementServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("service_agreement.deactivate",
 		mcp.WithDescription("Deactivate a service agreement"),
 		mcp.WithString("id",
@@ -259,10 +238,6 @@ func serviceAgreementDeactivateTool(service AgreementServiceProvider, guard Ingr
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("service agreement service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "service_agreement.deactivate", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		id := strings.TrimSpace(req.GetString("id", ""))

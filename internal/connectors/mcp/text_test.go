@@ -30,6 +30,28 @@ func TestSessionStatusText(t *testing.T) {
 			},
 			want: "Status: active\nEmail: user@example.com\nEmail verified: true\nSubject: subject-123\nIssuer: https://issuer.example\n",
 		},
+		{
+			name: "synthetic MCP API-key identity hides internal fields",
+			in: app.SessionStatusDTO{
+				Status:        "active",
+				Email:         syntheticMCPEmail,
+				EmailVerified: true,
+				Subject:       syntheticMCPSubject,
+				Issuer:        syntheticMCPIssuer,
+			},
+			want: "Status: active\n",
+		},
+		{
+			name: "real identity that coincidentally matches email only is not suppressed",
+			in: app.SessionStatusDTO{
+				Status:        "active",
+				Email:         syntheticMCPEmail,
+				EmailVerified: true,
+				Subject:       "real-subject",
+				Issuer:        "https://real.issuer",
+			},
+			want: "Status: active\nEmail: mcp@local\nEmail verified: true\nSubject: real-subject\nIssuer: https://real.issuer\n",
+		},
 	}
 
 	for _, tc := range tests {

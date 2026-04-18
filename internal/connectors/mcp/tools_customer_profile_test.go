@@ -81,9 +81,8 @@ func TestCustomerProfileListToolHandlers(t *testing.T) {
 			PageSize: 10,
 		},
 	}
-	guard := NewIngressGuard([]string{"127.0.0.1"})
 
-	_, handler := customerProfileListTool(service, guard, nil)
+	_, handler := customerProfileListTool(service, nil)
 	result, err := handler(context.Background(), mcp.CallToolRequest{Header: headerWithValues(map[string]string{
 		"X-Forwarded-For": "127.0.0.1",
 	}), Params: mcp.CallToolParams{Name: "customer_profile.list"}})
@@ -151,7 +150,7 @@ func TestCustomerProfileCreateToolHandlers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, handler := customerProfileCreateTool(tc.service, NewIngressGuard(nil), nil)
+			_, handler := customerProfileCreateTool(tc.service, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "customer_profile.create", Arguments: tc.arguments},
 			})
@@ -265,7 +264,7 @@ func TestCustomerProfileUpdateToolHandlers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, handler := customerProfileUpdateTool(tc.service, NewIngressGuard(nil), nil)
+			_, handler := customerProfileUpdateTool(tc.service, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "customer_profile.update", Arguments: tc.arguments},
 			})
@@ -329,7 +328,7 @@ func TestCustomerProfileCreateToolHandlers_BillingAddress(t *testing.T) {
 		},
 	}
 
-	_, handler := customerProfileCreateTool(svc, NewIngressGuard(nil), nil)
+	_, handler := customerProfileCreateTool(svc, nil)
 	result, err := handler(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name: "customer_profile.create",
@@ -423,7 +422,7 @@ func TestCustomerProfileUpdateToolHandlers_PatchPointerSemantics(t *testing.T) {
 			svc := &customerProfileWriteServiceStub{
 				updateRes: app.CustomerProfileDTO{ID: "cus_123", LegalEntityID: "le_456", Status: "active"},
 			}
-			_, handler := customerProfileUpdateTool(svc, NewIngressGuard(nil), nil)
+			_, handler := customerProfileUpdateTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "customer_profile.update", Arguments: tc.arguments},
 			})
@@ -497,7 +496,7 @@ func TestCustomerProfileDeleteToolHandlers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, handler := customerProfileDeleteTool(tc.service, NewIngressGuard(nil), nil)
+			_, handler := customerProfileDeleteTool(tc.service, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "customer_profile.delete", Arguments: tc.arguments},
 			})

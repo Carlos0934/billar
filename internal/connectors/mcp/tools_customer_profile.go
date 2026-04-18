@@ -7,46 +7,41 @@ import (
 	"strings"
 
 	"github.com/Carlos0934/billar/internal/app"
-	"github.com/Carlos0934/billar/internal/infra/logging"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 )
 
-func registerCustomerProfileTools(server *mcpsrv.MCPServer, service CustomerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) []string {
+func registerCustomerProfileTools(server *mcpsrv.MCPServer, service CustomerProfileWriteProvider, logger *slog.Logger) []string {
 	registered := make([]string, 0, 5)
 
-	tool, handler := customerProfileListTool(service, guard, logger)
+	tool, handler := customerProfileListTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = customerProfileCreateTool(service, guard, logger)
+	tool, handler = customerProfileCreateTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = customerProfileGetTool(service, guard, logger)
+	tool, handler = customerProfileGetTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = customerProfileUpdateTool(service, guard, logger)
+	tool, handler = customerProfileUpdateTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = customerProfileDeleteTool(service, guard, logger)
+	tool, handler = customerProfileDeleteTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
 	return registered
 }
 
-func customerProfileListTool(service CustomerProfileListProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func customerProfileListTool(service CustomerProfileListProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("customer_profile.list", mcp.WithDescription("Return a paginated list of customer profiles"))
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("customer profile service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "customer_profile.list", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		query := app.ListQuery{
@@ -70,7 +65,7 @@ func customerProfileListTool(service CustomerProfileListProvider, guard IngressG
 	}
 }
 
-func customerProfileCreateTool(service CustomerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func customerProfileCreateTool(service CustomerProfileWriteProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("customer_profile.create",
 		mcp.WithDescription(`Create a new customer profile.
 
@@ -135,10 +130,6 @@ OPTIONAL FIELDS:
 		if service == nil {
 			return mcp.NewToolResultError("customer profile service is required"), nil
 		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "customer_profile.create", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
-		}
 
 		var input CustomerProfileCreateInput
 		if err := req.BindArguments(&input); err != nil {
@@ -154,7 +145,7 @@ OPTIONAL FIELDS:
 	}
 }
 
-func customerProfileGetTool(service CustomerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func customerProfileGetTool(service CustomerProfileWriteProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("customer_profile.get",
 		mcp.WithDescription("Get a customer profile by ID"),
 		mcp.WithString("id",
@@ -165,10 +156,6 @@ func customerProfileGetTool(service CustomerProfileWriteProvider, guard IngressG
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("customer profile service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "customer_profile.get", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		id := strings.TrimSpace(req.GetString("id", ""))
@@ -185,7 +172,7 @@ func customerProfileGetTool(service CustomerProfileWriteProvider, guard IngressG
 	}
 }
 
-func customerProfileUpdateTool(service CustomerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func customerProfileUpdateTool(service CustomerProfileWriteProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("customer_profile.update",
 		mcp.WithDescription(`Update an existing customer profile with partial patch.
 
@@ -244,10 +231,6 @@ are cascaded to the linked legal entity when provided.`),
 		if service == nil {
 			return mcp.NewToolResultError("customer profile service is required"), nil
 		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "customer_profile.update", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
-		}
 
 		var input CustomerProfileUpdateInput
 		if err := req.BindArguments(&input); err != nil {
@@ -268,7 +251,7 @@ are cascaded to the linked legal entity when provided.`),
 	}
 }
 
-func customerProfileDeleteTool(service CustomerProfileWriteProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func customerProfileDeleteTool(service CustomerProfileWriteProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("customer_profile.delete",
 		mcp.WithDescription("Delete a customer profile"),
 		mcp.WithString("id",
@@ -279,10 +262,6 @@ func customerProfileDeleteTool(service CustomerProfileWriteProvider, guard Ingre
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("customer profile service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "customer_profile.delete", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		id := strings.TrimSpace(req.GetString("id", ""))

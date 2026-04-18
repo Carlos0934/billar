@@ -16,66 +16,53 @@ func TestLoadAuthConfig(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "parses values and trims whitespace",
+			name: "parses single api key",
 			env: map[string]string{
-				"OAUTH_CLIENT_ID":          " client-id ",
-				"OAUTH_ISSUER_URL":         " https://issuer.example ",
-				"MCP_HTTP_LISTEN_ADDR":     " 127.0.0.1:8080 ",
-				"AUTH_ALLOWED_EMAILS":      " admin@example.com , user@example.com ",
-				"AUTH_ALLOWED_DOMAINS":     " allowed.com , company.com ",
-				"AUTH_RESOURCE_SERVER_URI": " https://resource.example ",
+				"MCP_API_KEYS":         "key-abc123",
+				"MCP_HTTP_LISTEN_ADDR": "127.0.0.1:8080",
 			},
 			want: AuthConfig{
-				ClientID:          "client-id",
-				IssuerURL:         "https://issuer.example",
-				ListenAddr:        "127.0.0.1:8080",
-				AllowedEmails:     []string{"admin@example.com", "user@example.com"},
-				AllowedDomains:    []string{"allowed.com", "company.com"},
-				ResourceServerURI: "https://resource.example",
+				APIKeys:    []string{"key-abc123"},
+				ListenAddr: "127.0.0.1:8080",
 			},
 		},
 		{
-			name: "defaults missing issuer and listen values",
+			name: "parses multiple comma-separated api keys",
 			env: map[string]string{
-				"OAUTH_CLIENT_ID":          "client-id",
-				"OAUTH_ISSUER_URL":         "",
-				"MCP_HTTP_LISTEN_ADDR":     "",
-				"AUTH_ALLOWED_EMAILS":      "admin@example.com",
-				"AUTH_ALLOWED_DOMAINS":     "",
-				"AUTH_RESOURCE_SERVER_URI": "https://resource.example",
+				"MCP_API_KEYS":         " key-one , key-two , key-three ",
+				"MCP_HTTP_LISTEN_ADDR": "127.0.0.1:9090",
 			},
 			want: AuthConfig{
-				ClientID:          "client-id",
-				IssuerURL:         "https://accounts.google.com",
-				ListenAddr:        "127.0.0.1:8080",
-				AllowedEmails:     []string{"admin@example.com"},
-				AllowedDomains:    []string{},
-				ResourceServerURI: "https://resource.example",
+				APIKeys:    []string{"key-one", "key-two", "key-three"},
+				ListenAddr: "127.0.0.1:9090",
 			},
 		},
 		{
-			name: "requires oidc client id",
+			name: "defaults listen addr when missing",
 			env: map[string]string{
-				"OAUTH_CLIENT_ID":          "",
-				"OAUTH_ISSUER_URL":         "https://issuer.example",
-				"MCP_HTTP_LISTEN_ADDR":     "127.0.0.1:8080",
-				"AUTH_ALLOWED_EMAILS":      "admin@example.com",
-				"AUTH_ALLOWED_DOMAINS":     "",
-				"AUTH_RESOURCE_SERVER_URI": "https://resource.example",
+				"MCP_API_KEYS":         "key-abc",
+				"MCP_HTTP_LISTEN_ADDR": "",
 			},
-			wantErr: "OAUTH_CLIENT_ID",
+			want: AuthConfig{
+				APIKeys:    []string{"key-abc"},
+				ListenAddr: "127.0.0.1:8080",
+			},
 		},
 		{
-			name: "rejects empty policy after trimming",
+			name: "fails when MCP_API_KEYS is empty",
 			env: map[string]string{
-				"OAUTH_CLIENT_ID":          "client-id",
-				"OAUTH_ISSUER_URL":         "https://issuer.example",
-				"MCP_HTTP_LISTEN_ADDR":     "127.0.0.1:8080",
-				"AUTH_ALLOWED_EMAILS":      "   ",
-				"AUTH_ALLOWED_DOMAINS":     "",
-				"AUTH_RESOURCE_SERVER_URI": "https://resource.example",
+				"MCP_API_KEYS":         "",
+				"MCP_HTTP_LISTEN_ADDR": "127.0.0.1:8080",
 			},
-			wantErr: "access policy",
+			wantErr: "MCP_API_KEYS",
+		},
+		{
+			name: "fails when MCP_API_KEYS is whitespace only",
+			env: map[string]string{
+				"MCP_API_KEYS":         "   ",
+				"MCP_HTTP_LISTEN_ADDR": "127.0.0.1:8080",
+			},
+			wantErr: "MCP_API_KEYS",
 		},
 	}
 
@@ -84,12 +71,8 @@ func TestLoadAuthConfig(t *testing.T) {
 
 		t.Run(tc.name, func(t *testing.T) {
 			for _, key := range []string{
-				"OAUTH_CLIENT_ID",
-				"OAUTH_ISSUER_URL",
+				"MCP_API_KEYS",
 				"MCP_HTTP_LISTEN_ADDR",
-				"AUTH_ALLOWED_EMAILS",
-				"AUTH_ALLOWED_DOMAINS",
-				"AUTH_RESOURCE_SERVER_URI",
 			} {
 				t.Setenv(key, tc.env[key])
 			}
@@ -116,6 +99,36 @@ func TestLoadAuthConfig(t *testing.T) {
 	}
 }
 
+// TestLoadAuthConfigFailsWhenMCPAPIKeysIsUnset verifies that LoadAuthConfig returns an error
+// when MCP_API_KEYS is not present in the environment at all (os.LookupEnv returns false).
+// This is distinct from the empty/whitespace cases tested in TestLoadAuthConfig.
+func TestLoadAuthConfigFailsWhenMCPAPIKeysIsUnset(t *testing.T) {
+	// Use a temp dir so there is no .env file that could set MCP_API_KEYS.
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	// Ensure MCP_API_KEYS is fully absent from the environment.
+	t.Setenv("MCP_API_KEYS", "placeholder") // registers cleanup via t.Cleanup
+	if err := os.Unsetenv("MCP_API_KEYS"); err != nil {
+		t.Fatalf("Unsetenv() error = %v", err)
+	}
+	t.Setenv("MCP_HTTP_LISTEN_ADDR", "127.0.0.1:8080")
+
+	_, err = LoadAuthConfig()
+	if err == nil {
+		t.Fatal("LoadAuthConfig() error = nil, want non-nil when MCP_API_KEYS is unset")
+	}
+	if !strings.Contains(err.Error(), "MCP_API_KEYS") {
+		t.Fatalf("LoadAuthConfig() error = %q, want it to mention MCP_API_KEYS", err.Error())
+	}
+}
+
 func TestLoadAuthConfigLoadsDotEnv(t *testing.T) {
 	oldwd, err := os.Getwd()
 	if err != nil {
@@ -123,18 +136,14 @@ func TestLoadAuthConfigLoadsDotEnv(t *testing.T) {
 	}
 
 	workdir := t.TempDir()
-	content := []byte("OAUTH_CLIENT_ID=from-file\nOAUTH_ISSUER_URL=https://issuer.from.file\nMCP_HTTP_LISTEN_ADDR=127.0.0.1:8080\nAUTH_ALLOWED_EMAILS= file-user@example.com \nAUTH_ALLOWED_DOMAINS=file.example.com\nAUTH_RESOURCE_SERVER_URI=https://resource.from.file\n")
+	content := []byte("MCP_API_KEYS=from-file-key\nMCP_HTTP_LISTEN_ADDR=127.0.0.1:8080\n")
 	if err := os.WriteFile(filepath.Join(workdir, ".env"), content, 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
 	for _, key := range []string{
-		"OAUTH_CLIENT_ID",
-		"OAUTH_ISSUER_URL",
+		"MCP_API_KEYS",
 		"MCP_HTTP_LISTEN_ADDR",
-		"AUTH_ALLOWED_EMAILS",
-		"AUTH_ALLOWED_DOMAINS",
-		"AUTH_RESOURCE_SERVER_URI",
 	} {
 		t.Setenv(key, "")
 	}
@@ -152,57 +161,8 @@ func TestLoadAuthConfigLoadsDotEnv(t *testing.T) {
 	}
 
 	want := AuthConfig{
-		ClientID:          "from-file",
-		IssuerURL:         "https://issuer.from.file",
-		ListenAddr:        "127.0.0.1:8080",
-		AllowedEmails:     []string{"file-user@example.com"},
-		AllowedDomains:    []string{"file.example.com"},
-		ResourceServerURI: "https://resource.from.file",
-	}
-
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoadAuthConfig() = %+v, want %+v", got, want)
-	}
-}
-
-func TestLoadAuthConfigPreservesExplicitEnvAndTrimsQuotedDotEnvValues(t *testing.T) {
-	oldwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error = %v", err)
-	}
-
-	workdir := t.TempDir()
-	content := []byte("OAUTH_CLIENT_ID='from-file'\nOAUTH_ISSUER_URL='https://issuer.from.file'\nMCP_HTTP_LISTEN_ADDR='127.0.0.1:8080'\nAUTH_ALLOWED_EMAILS=' file-user@example.com '\nAUTH_ALLOWED_DOMAINS=\"file.example.com\"\nAUTH_RESOURCE_SERVER_URI='https://resource.from.file'\n")
-	if err := os.WriteFile(filepath.Join(workdir, ".env"), content, 0o600); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	t.Setenv("OAUTH_CLIENT_ID", "preset-client-id")
-	t.Setenv("OAUTH_ISSUER_URL", "")
-	t.Setenv("MCP_HTTP_LISTEN_ADDR", "")
-	t.Setenv("AUTH_ALLOWED_EMAILS", "")
-	t.Setenv("AUTH_ALLOWED_DOMAINS", "")
-	t.Setenv("AUTH_RESOURCE_SERVER_URI", "")
-
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("Chdir() error = %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(oldwd)
-	})
-
-	got, err := LoadAuthConfig()
-	if err != nil {
-		t.Fatalf("LoadAuthConfig() error = %v", err)
-	}
-
-	want := AuthConfig{
-		ClientID:          "preset-client-id",
-		IssuerURL:         "https://issuer.from.file",
-		ListenAddr:        "127.0.0.1:8080",
-		AllowedEmails:     []string{"file-user@example.com"},
-		AllowedDomains:    []string{"file.example.com"},
-		ResourceServerURI: "https://resource.from.file",
+		APIKeys:    []string{"from-file-key"},
+		ListenAddr: "127.0.0.1:8080",
 	}
 
 	if !reflect.DeepEqual(got, want) {
@@ -219,12 +179,8 @@ func TestEnvExampleDocumentsAuthSetup(t *testing.T) {
 
 	text := string(content)
 	for _, want := range []string{
-		"OAUTH_CLIENT_ID=",
-		"OAUTH_ISSUER_URL=",
+		"MCP_API_KEYS=",
 		"MCP_HTTP_LISTEN_ADDR=",
-		"AUTH_RESOURCE_SERVER_URI=",
-		"AUTH_ALLOWED_EMAILS=",
-		"AUTH_ALLOWED_DOMAINS=",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf(".env.example missing %q", want)

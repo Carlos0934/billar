@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/Carlos0934/billar/internal/app"
-	"github.com/Carlos0934/billar/internal/infra/logging"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 )
@@ -21,33 +20,33 @@ type InvoiceServiceProvider interface {
 	ListInvoices(ctx context.Context, customerID string, statusFilter string) ([]app.InvoiceSummaryDTO, error)
 }
 
-func registerInvoiceTools(server *mcpsrv.MCPServer, service InvoiceServiceProvider, guard IngressGuard, logger *slog.Logger) []string {
+func registerInvoiceTools(server *mcpsrv.MCPServer, service InvoiceServiceProvider, logger *slog.Logger) []string {
 	registered := make([]string, 0, 5)
 
-	tool, handler := invoiceDraftTool(service, guard, logger)
+	tool, handler := invoiceDraftTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = invoiceIssueTool(service, guard, logger)
+	tool, handler = invoiceIssueTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = invoiceDiscardTool(service, guard, logger)
+	tool, handler = invoiceDiscardTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = invoiceGetTool(service, guard, logger)
+	tool, handler = invoiceGetTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
-	tool, handler = invoiceListTool(service, guard, logger)
+	tool, handler = invoiceListTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
 	return registered
 }
 
-func invoiceDraftTool(service InvoiceServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func invoiceDraftTool(service InvoiceServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("invoice.draft",
 		mcp.WithDescription("Create a draft invoice from unbilled time entries for a customer"),
 		mcp.WithString("customer_profile_id",
@@ -59,10 +58,6 @@ func invoiceDraftTool(service InvoiceServiceProvider, guard IngressGuard, logger
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("invoice service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "invoice.draft", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		customerProfileID := strings.TrimSpace(req.GetString("customer_profile_id", ""))
@@ -79,7 +74,7 @@ func invoiceDraftTool(service InvoiceServiceProvider, guard IngressGuard, logger
 	}
 }
 
-func invoiceIssueTool(service InvoiceServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func invoiceIssueTool(service InvoiceServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("invoice.issue",
 		mcp.WithDescription("Issue a draft invoice, assigning a permanent invoice number"),
 		mcp.WithString("id",
@@ -91,10 +86,6 @@ func invoiceIssueTool(service InvoiceServiceProvider, guard IngressGuard, logger
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("invoice service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "invoice.issue", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		id := strings.TrimSpace(req.GetString("id", ""))
@@ -111,7 +102,7 @@ func invoiceIssueTool(service InvoiceServiceProvider, guard IngressGuard, logger
 	}
 }
 
-func invoiceDiscardTool(service InvoiceServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func invoiceDiscardTool(service InvoiceServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("invoice.discard",
 		mcp.WithDescription("Discard an invoice. Drafts are hard-deleted (entries unlocked); issued invoices are soft-discarded (number permanently consumed)."),
 		mcp.WithString("id",
@@ -123,10 +114,6 @@ func invoiceDiscardTool(service InvoiceServiceProvider, guard IngressGuard, logg
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("invoice service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "invoice.discard", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		id := strings.TrimSpace(req.GetString("id", ""))
@@ -186,7 +173,7 @@ func invoiceTextFields(inv app.InvoiceDTO) string {
 	return b.String()
 }
 
-func invoiceGetTool(service InvoiceServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func invoiceGetTool(service InvoiceServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("invoice.get",
 		mcp.WithDescription("Retrieve a single invoice by ID, including all line items"),
 		mcp.WithString("id",
@@ -198,10 +185,6 @@ func invoiceGetTool(service InvoiceServiceProvider, guard IngressGuard, logger *
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("invoice service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "invoice.get", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		id := strings.TrimSpace(req.GetString("id", ""))
@@ -218,7 +201,7 @@ func invoiceGetTool(service InvoiceServiceProvider, guard IngressGuard, logger *
 	}
 }
 
-func invoiceListTool(service InvoiceServiceProvider, guard IngressGuard, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+func invoiceListTool(service InvoiceServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
 	tool := mcp.NewTool("invoice.list",
 		mcp.WithDescription("List invoices for a customer profile (summary view, no line items)"),
 		mcp.WithString("customer_profile_id",
@@ -233,10 +216,6 @@ func invoiceListTool(service InvoiceServiceProvider, guard IngressGuard, logger 
 	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if service == nil {
 			return mcp.NewToolResultError("invoice service is required"), nil
-		}
-		if err := guard.authorize(req.Header); err != nil {
-			logging.Event(ctx, logger, slog.LevelWarn, "invoice.list", "mcp", "denied", slog.String("reason", classifyMCPAuthReason(err)))
-			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		customerProfileID := strings.TrimSpace(req.GetString("customer_profile_id", ""))

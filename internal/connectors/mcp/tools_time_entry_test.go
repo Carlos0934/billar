@@ -133,7 +133,7 @@ func TestTimeEntryRecordToolHandler(t *testing.T) {
 			if tc.service != nil {
 				svc = tc.service
 			}
-			_, handler := timeEntryRecordTool(svc, NewIngressGuard(nil), nil)
+			_, handler := timeEntryRecordTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "time_entry.record", Arguments: tc.arguments},
 			})
@@ -208,7 +208,7 @@ func TestTimeEntryGetToolHandler(t *testing.T) {
 			if tc.service != nil {
 				svc = tc.service
 			}
-			_, handler := timeEntryGetTool(svc, NewIngressGuard(nil), nil)
+			_, handler := timeEntryGetTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "time_entry.get", Arguments: tc.arguments},
 			})
@@ -278,7 +278,7 @@ func TestTimeEntryUpdateToolHandler(t *testing.T) {
 			if tc.service != nil {
 				svc = tc.service
 			}
-			_, handler := timeEntryUpdateTool(svc, NewIngressGuard(nil), nil)
+			_, handler := timeEntryUpdateTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "time_entry.update", Arguments: tc.arguments},
 			})
@@ -351,7 +351,7 @@ func TestTimeEntryDeleteToolHandler(t *testing.T) {
 			if tc.service != nil {
 				svc = tc.service
 			}
-			_, handler := timeEntryDeleteTool(svc, NewIngressGuard(nil), nil)
+			_, handler := timeEntryDeleteTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "time_entry.delete", Arguments: tc.arguments},
 			})
@@ -419,7 +419,7 @@ func TestTimeEntryListToolHandler(t *testing.T) {
 			if tc.service != nil {
 				svc = tc.service
 			}
-			_, handler := timeEntryListTool(svc, NewIngressGuard(nil), nil)
+			_, handler := timeEntryListTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "time_entry.list_by_customer_profile", Arguments: tc.arguments},
 			})
@@ -487,7 +487,7 @@ func TestTimeEntryListUnbilledToolHandler(t *testing.T) {
 			if tc.service != nil {
 				svc = tc.service
 			}
-			_, handler := timeEntryListUnbilledTool(svc, NewIngressGuard(nil), nil)
+			_, handler := timeEntryListUnbilledTool(svc, nil)
 			result, err := handler(context.Background(), mcp.CallToolRequest{
 				Params: mcp.CallToolParams{Name: "time_entry.list_unbilled", Arguments: tc.arguments},
 			})

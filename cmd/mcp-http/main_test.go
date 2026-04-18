@@ -19,22 +19,15 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-type stubMCPHTTPAuthenticator struct{}
-
-func (stubMCPHTTPAuthenticator) Authenticate(ctx context.Context, bearerToken string) (app.AuthenticatedIdentity, error) {
-	_ = ctx
-	_ = bearerToken
-	return app.AuthenticatedIdentity{Email: "integration@example.com", EmailVerified: true, Subject: "local-bypass"}, nil
-}
+const integrationAPIKey = "integration-test-api-key-abc123"
 
 func TestNewServerWiresHTTPRoutesAndTimeEntryTools(t *testing.T) {
 	t.Parallel()
 
 	store := mustOpenMCPHTTPStore(t)
 	server, err := newServer(
-		config.AuthConfig{ListenAddr: "127.0.0.1:0", IssuerURL: "https://issuer.example", ResourceServerURI: "https://resource.example"},
+		config.AuthConfig{ListenAddr: "127.0.0.1:0", APIKeys: []string{integrationAPIKey}},
 		config.Config{AppName: "billar"},
-		stubMCPHTTPAuthenticator{},
 		store,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
@@ -65,22 +58,30 @@ func TestNewServerWiresHTTPRoutesAndTimeEntryTools(t *testing.T) {
 		t.Fatalf("/healthz payload = %+v, want billar ok", health)
 	}
 
-	resp, err = http.Get(httpServer.URL + "/.well-known/oauth-protected-resource")
+	// OAuth metadata endpoint must NOT exist (removed by this change).
+	resp2, err := http.Get(httpServer.URL + "/v1/mcp/.well-known/oauth-protected-resource")
 	if err != nil {
-		t.Fatalf("GET metadata error = %v", err)
+		t.Fatalf("GET oauth metadata error = %v", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET metadata status = %d, want %d", resp.StatusCode, http.StatusOK)
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET oauth metadata status = %d, want %d (metadata route should be gone)", resp2.StatusCode, http.StatusNotFound)
 	}
-	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "application/json") {
-		t.Fatalf("metadata content-type = %q, want json", got)
+
+	// Unauthenticated request must return 401.
+	resp3, err := http.Post(httpServer.URL+"/v1/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/mcp (no auth) error = %v", err)
+	}
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated /v1/mcp status = %d, want %d", resp3.StatusCode, http.StatusUnauthorized)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	httpTransport, err := transport.NewStreamableHTTP(httpServer.URL+"/v1/mcp", transport.WithHTTPHeaders(map[string]string{"Authorization": "Bearer test-token"}))
+	httpTransport, err := transport.NewStreamableHTTP(httpServer.URL+"/v1/mcp", transport.WithHTTPHeaders(map[string]string{"Authorization": "Bearer " + integrationAPIKey}))
 	if err != nil {
 		t.Fatalf("NewStreamableHTTP() error = %v", err)
 	}
@@ -114,11 +115,8 @@ func TestNewServerWiresHTTPRoutesAndTimeEntryTools(t *testing.T) {
 }
 
 func TestMainWiresHTTPServer(t *testing.T) {
-	t.Setenv("OAUTH_CLIENT_ID", "test-client")
-	t.Setenv("OAUTH_ISSUER_URL", "https://issuer.example")
+	t.Setenv("MCP_API_KEYS", integrationAPIKey)
 	t.Setenv("MCP_HTTP_LISTEN_ADDR", "127.0.0.1:0")
-	t.Setenv("AUTH_ALLOWED_EMAILS", "integration@example.com")
-	t.Setenv("AUTH_RESOURCE_SERVER_URI", "https://resource.example")
 	t.Setenv("BILLAR_DB_PATH", t.TempDir()+"/mcp-http-main.db")
 
 	oldListenAndServe := listenAndServe
