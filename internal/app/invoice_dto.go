@@ -13,6 +13,10 @@ type InvoiceDTO struct {
 	CustomerID    string           `json:"customer_id" toon:"customer_id"`
 	Status        string           `json:"status" toon:"status"`
 	Currency      string           `json:"currency" toon:"currency"`
+	PeriodStart   string           `json:"period_start" toon:"period_start"`
+	PeriodEnd     string           `json:"period_end" toon:"period_end"`
+	DueDate       string           `json:"due_date" toon:"due_date"`
+	Notes         string           `json:"notes" toon:"notes"`
 	IsDraft       bool             `json:"is_draft" toon:"is_draft"`
 	IsIssued      bool             `json:"is_issued" toon:"is_issued"`
 	IsDiscarded   bool             `json:"is_discarded" toon:"is_discarded"`
@@ -44,12 +48,19 @@ type InvoiceSummaryDTO struct {
 	CustomerID    string `json:"customer_id" toon:"customer_id"`
 	Status        string `json:"status" toon:"status"`
 	Currency      string `json:"currency" toon:"currency"`
+	PeriodStart   string `json:"period_start" toon:"period_start"`
+	PeriodEnd     string `json:"period_end" toon:"period_end"`
+	DueDate       string `json:"due_date" toon:"due_date"`
 	GrandTotal    int64  `json:"grand_total" toon:"grand_total"`
 	CreatedAt     string `json:"created_at" toon:"created_at"`
 }
 
 type CreateDraftFromUnbilledCommand struct {
 	CustomerProfileID string `json:"customer_profile_id"`
+	PeriodStart       string `json:"period_start,omitempty"`
+	PeriodEnd         string `json:"period_end,omitempty"`
+	DueDate           string `json:"due_date,omitempty"`
+	Notes             string `json:"notes,omitempty"`
 }
 
 type IssueInvoiceCommand struct {
@@ -58,6 +69,19 @@ type IssueInvoiceCommand struct {
 
 type DiscardInvoiceCommand struct {
 	InvoiceID string `json:"invoice_id"`
+}
+
+type AddDraftLineCommand struct {
+	InvoiceID   string `json:"invoice_id"`
+	Description string `json:"description"`
+	QuantityMin int64  `json:"quantity_min"`
+	UnitRate    int64  `json:"unit_rate_amount"`
+	Currency    string `json:"currency"`
+}
+
+type RemoveDraftLineCommand struct {
+	InvoiceID     string `json:"invoice_id"`
+	InvoiceLineID string `json:"invoice_line_id"`
 }
 
 // DiscardResult captures the outcome of a discard operation so connectors can
@@ -80,6 +104,10 @@ func invoiceToDTO(inv core.Invoice, entries []core.TimeEntry) InvoiceDTO {
 		CustomerID:    inv.CustomerID,
 		Status:        string(inv.Status),
 		Currency:      inv.Currency,
+		PeriodStart:   formatInvoiceTime(inv.PeriodStart),
+		PeriodEnd:     formatInvoiceTime(inv.PeriodEnd),
+		DueDate:       formatInvoiceTime(inv.DueDate),
+		Notes:         inv.Notes,
 		IsDraft:       inv.IsDraft(),
 		IsIssued:      inv.IsIssued(),
 		IsDiscarded:   inv.IsDiscarded(),
@@ -89,8 +117,7 @@ func invoiceToDTO(inv core.Invoice, entries []core.TimeEntry) InvoiceDTO {
 		UpdatedAt:     formatInvoiceTime(inv.UpdatedAt),
 	}
 	for _, line := range inv.Lines {
-		entry := lineMap[line.TimeEntryID]
-		lineDTO := invoiceLineToDTO(line, entry)
+		lineDTO := invoiceLineToDTO(line, lineMap[line.TimeEntryID])
 		dto.Lines = append(dto.Lines, lineDTO)
 		dto.Subtotal += lineDTO.LineTotalAmount
 	}
@@ -99,14 +126,22 @@ func invoiceToDTO(inv core.Invoice, entries []core.TimeEntry) InvoiceDTO {
 }
 
 func invoiceLineToDTO(line core.InvoiceLine, entry core.TimeEntry) InvoiceLineDTO {
-	total := line.LineTotal(entry)
+	description := line.Description
+	if description == "" {
+		description = entry.Description
+	}
+	quantityMin := line.QuantityMin
+	if quantityMin == 0 {
+		quantityMin = int64(entry.Hours) * 60 / 10000
+	}
+	total := core.Money{Amount: line.UnitRate.Amount * quantityMin / 60, Currency: line.UnitRate.Currency}
 	return InvoiceLineDTO{
 		ID:                 line.ID,
 		InvoiceID:          line.InvoiceID,
 		ServiceAgreementID: line.ServiceAgreementID,
 		TimeEntryID:        line.TimeEntryID,
-		Description:        entry.Description,
-		QuantityMin:        int64(entry.Hours) * 60 / 10000,
+		Description:        description,
+		QuantityMin:        quantityMin,
 		UnitRateAmount:     line.UnitRate.Amount,
 		UnitRateCurrency:   line.UnitRate.Currency,
 		LineTotalAmount:    total.Amount,

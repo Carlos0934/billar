@@ -61,7 +61,11 @@ func customerProfileListTool(service CustomerProfileListProvider, logger *slog.L
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(customerProfileListText(result)), nil
+		items := result.Items
+		if items == nil {
+			items = []app.CustomerProfileDTO{}
+		}
+		return mcp.NewToolResultStructured(items, customerProfileListText(result)), nil
 	}
 }
 
@@ -141,7 +145,7 @@ OPTIONAL FIELDS:
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(customerProfileCreateText(result)), nil
+		return mcp.NewToolResultStructured(result, customerProfileCreateText(result)), nil
 	}
 }
 
@@ -168,7 +172,7 @@ func customerProfileGetTool(service CustomerProfileWriteProvider, logger *slog.L
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(customerProfileGetText(result)), nil
+		return mcp.NewToolResultStructured(result, customerProfileGetText(result)), nil
 	}
 }
 
@@ -247,7 +251,7 @@ are cascaded to the linked legal entity when provided.`),
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(customerProfileUpdateText(result)), nil
+		return mcp.NewToolResultStructured(result, customerProfileUpdateText(result)), nil
 	}
 }
 
@@ -273,7 +277,7 @@ func customerProfileDeleteTool(service CustomerProfileWriteProvider, logger *slo
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("Customer profile deleted: %s", id)), nil
+		return mcp.NewToolResultStructured(newDeleteAck(id), fmt.Sprintf("Customer profile deleted: %s", id)), nil
 	}
 }
 

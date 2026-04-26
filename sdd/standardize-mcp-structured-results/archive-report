@@ -1,0 +1,110 @@
+# Archive Report: `standardize-mcp-structured-results`
+
+**Change**: `standardize-mcp-structured-results`
+**Archived**: 2026-04-25
+**Artifact store**: Engram
+**Mode**: Engram (no openspec filesystem artifacts present)
+**Verdict at archive**: PASS WITH WARNINGS
+
+---
+
+## Summary
+
+The change standardized MCP tool success responses to return canonical structured payloads via `mcp.NewToolResultStructured(payload, text)` alongside preserved text fallback, without changing app behavior. All 31 tasks completed. `make test` (856 tests) and `make build` pass.
+
+---
+
+## Warnings Preserved
+
+1. **Design artifact stale ack shape**: The design artifact still references the old delete-ack shape (`Resource`, `Status:"deleted"`) while the stored spec/tasks/implementation now use `{id, action:"delete", status:"ok"}` with no `resource` field. This is documented as an intentional reconciliation per the stored spec contract.
+2. **Unrelated working-tree diffs**: The repository contains pre-existing unrelated changes in app/, infra/, CLI/, and docs/ directories. This change modified only MCP connector files.
+
+---
+
+## Artifacts Persisted to Engram
+
+| Artifact | Observation ID | Notes |
+|----------|---------------|-------|
+| `proposal` | #3723 | Intent, scope, approach, rollback plan |
+| `spec` | #3725 | Full delta spec with scenarios and requirements |
+| `design` | #3726 | Technical design; note stale delete-ack shape warning |
+| `tasks` | #3727 | 31 tasks across 8 phases; 3 revisions for spec reconciliation |
+| `apply-progress` | #3733 | TDD evidence, file changes, deviations; 2 revisions |
+| `verify-report` | #3741 | PASS WITH WARNINGS; 7/7 spec scenarios compliant; 856 tests green |
+
+---
+
+## Lineage
+
+```
+proposal (#3723)
+  └── spec (#3725)
+        └── design (#3726)
+              └── tasks (#3727) + apply-progress (#3733)
+                    └── verify-report (#3741)
+                          └── archive-report (this document)
+```
+
+---
+
+## Spec Sync
+
+No openspec main specs exist (`openspec/specs/` not present). Delta spec lives in Engram only.
+
+**Delta spec summary** (from spec #3725):
+
+| Requirement | Scenarios | Status |
+|-------------|-----------|--------|
+| Targeted MCP Tools Return Structured Content | Single-DTO success, List→empty slice, Delete ack, Invoice discard merge | ✅ Implemented |
+| Backward-Compatible Text Fallback | Text preserved alongside structured payload | ✅ Implemented |
+| Error Behavior Unchanged | Not-found errors remain text-only | ✅ Implemented |
+| Test Coverage at Connector Boundary | Parity test per tool | ✅ Implemented |
+
+---
+
+## Archive Contents
+
+| Artifact | Engram ID | Filesystem |
+|----------|-----------|------------|
+| `proposal` | #3723 | ❌ (Engram only) |
+| `spec` | #3725 | ❌ (Engram only) |
+| `design` | #3726 | ❌ (Engram only) |
+| `tasks` | #3727 | ❌ (Engram only) |
+| `apply-progress` | #3733 | ❌ (Engram only) |
+| `verify-report` | #3741 | ❌ (Engram only) |
+| `archive-report` | This doc | ✅ `sdd/standardize-mcp-structured-results/archive-report` |
+
+---
+
+## Changed Files (from apply-progress #3733)
+
+| File | Action |
+|------|--------|
+| `internal/connectors/mcp/acks.go` | Created |
+| `internal/connectors/mcp/acks_test.go` | Created |
+| `internal/connectors/mcp/structured_results_test.go` | Created |
+| `internal/connectors/mcp/tools_invoice.go` | Modified |
+| `internal/connectors/mcp/tools_time_entry.go` | Modified |
+| `internal/connectors/mcp/tools_customer_profile.go` | Modified |
+| `internal/connectors/mcp/tools_service_agreement.go` | Modified |
+| `internal/connectors/mcp/tools_issuer_profile.go` | Modified |
+| `internal/connectors/mcp/tools_customer_profile_test.go` | Modified |
+| `internal/connectors/mcp/tools_issuer_profile_test.go` | Modified |
+| `internal/connectors/mcp/http_integration_test.go` | Modified |
+
+**Unchanged (out of scope)**: `tools_session.go`, `tools_legal_entity.go`, app/, infra/, CLI/.
+
+---
+
+## SDD Cycle Complete
+
+All phases completed:
+1. ✅ Proposal created
+2. ✅ Spec written
+3. ✅ Design written
+4. ✅ Tasks broken down
+5. ✅ Implementation complete (Strict TDD)
+6. ✅ Verification passed with warnings
+7. ✅ Archive persisted
+
+The change is fully planned, implemented, verified, and archived. Ready for the next change.

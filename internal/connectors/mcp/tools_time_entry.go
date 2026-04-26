@@ -135,7 +135,7 @@ REQUIRED FIELDS:
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(timeEntryRecordText(result)), nil
+		return mcp.NewToolResultStructured(result, timeEntryRecordText(result)), nil
 	}
 }
 
@@ -163,7 +163,7 @@ func timeEntryGetTool(service TimeEntryServiceProvider, logger *slog.Logger) (mc
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(timeEntryGetText(result)), nil
+		return mcp.NewToolResultStructured(result, timeEntryGetText(result)), nil
 	}
 }
 
@@ -202,7 +202,7 @@ func timeEntryUpdateTool(service TimeEntryServiceProvider, logger *slog.Logger) 
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(timeEntryUpdateText(result)), nil
+		return mcp.NewToolResultStructured(result, timeEntryUpdateText(result)), nil
 	}
 }
 
@@ -229,7 +229,7 @@ func timeEntryDeleteTool(service TimeEntryServiceProvider, logger *slog.Logger) 
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("Time entry deleted: %s\n", id)), nil
+		return mcp.NewToolResultStructured(newDeleteAck(id), fmt.Sprintf("Time entry deleted: %s\n", id)), nil
 	}
 }
 
@@ -257,7 +257,10 @@ func timeEntryListTool(service TimeEntryServiceProvider, logger *slog.Logger) (m
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(timeEntryListText(results)), nil
+		if results == nil {
+			results = []app.TimeEntryDTO{}
+		}
+		return mcp.NewToolResultStructured(results, timeEntryListText(results)), nil
 	}
 }
 
@@ -285,7 +288,10 @@ func timeEntryListUnbilledTool(service TimeEntryServiceProvider, logger *slog.Lo
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(timeEntryListUnbilledText(results)), nil
+		if results == nil {
+			results = []app.TimeEntryDTO{}
+		}
+		return mcp.NewToolResultStructured(results, timeEntryListUnbilledText(results)), nil
 	}
 }
 

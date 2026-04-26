@@ -8,12 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	_ "embed"
 	_ "modernc.org/sqlite"
 )
-
-//go:embed schema.sql
-var schemaSQL string
 
 type Store struct {
 	db      *sql.DB
@@ -37,7 +33,7 @@ func Open(path string) (*Store, error) {
 	}
 
 	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("create sqlite directory: %w", err)
 		}
 	}
@@ -57,12 +53,13 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("enable foreign keys: %w", err)
 	}
 
-	store := &Store{db: db, cleanup: cleanup}
-	if err := store.bootstrap(); err != nil {
-		_ = store.Close()
-		return nil, err
+	if err := applyMigrations(db, migrationsFS); err != nil {
+		_ = db.Close()
+		cleanup()
+		return nil, fmt.Errorf("apply sqlite migrations: %w", err)
 	}
 
+	store := &Store{db: db, cleanup: cleanup}
 	return store, nil
 }
 
@@ -90,20 +87,4 @@ func (s *Store) Close() error {
 	}
 
 	return errors.Join(errs...)
-}
-
-func (s *Store) bootstrap() error {
-	if s == nil || s.db == nil {
-		return errors.New("sqlite store is not open")
-	}
-
-	if strings.TrimSpace(schemaSQL) == "" {
-		return errors.New("sqlite schema is empty")
-	}
-
-	if _, err := s.db.Exec(schemaSQL); err != nil {
-		return fmt.Errorf("bootstrap sqlite schema: %w", err)
-	}
-
-	return nil
 }

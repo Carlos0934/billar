@@ -15,6 +15,9 @@ type issuerProfileServiceStub struct {
 	createArg *app.CreateIssuerProfileCommand
 	createRes app.IssuerProfileDTO
 	createErr error
+	getID     string
+	getRes    app.IssuerProfileDTO
+	getErr    error
 	updateID  string
 	updateArg *app.PatchIssuerProfileCommand
 	updateRes app.IssuerProfileDTO
@@ -31,7 +34,8 @@ func (s *issuerProfileServiceStub) Create(ctx context.Context, cmd app.CreateIss
 
 func (s *issuerProfileServiceStub) Get(ctx context.Context, id string) (app.IssuerProfileDTO, error) {
 	_ = ctx
-	return app.IssuerProfileDTO{}, errors.New("not implemented in test stub")
+	s.getID = id
+	return s.getRes, s.getErr
 }
 
 func (s *issuerProfileServiceStub) Update(ctx context.Context, id string, cmd app.PatchIssuerProfileCommand) (app.IssuerProfileDTO, error) {

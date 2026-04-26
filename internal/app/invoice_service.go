@@ -21,6 +21,8 @@ type InvoiceStore interface {
 	Update(ctx context.Context, invoice *core.Invoice) error
 	Delete(ctx context.Context, id string) error
 	ListByCustomer(ctx context.Context, customerID string, status ...core.InvoiceStatus) ([]core.InvoiceSummary, error)
+	AddLine(ctx context.Context, invoiceID string, line core.InvoiceLine) error
+	RemoveLine(ctx context.Context, invoiceID, lineID string) error
 }
 
 type InvoiceNumberGenerator interface {
@@ -33,14 +35,21 @@ type InvoiceService struct {
 	agreements ServiceAgreementStore
 	profiles   CustomerProfileStore
 	numbers    InvoiceNumberGenerator
+	issuers    DefaultIssuerProfileStore
 }
 
-func NewInvoiceService(invoices InvoiceStore, entries TimeEntryStore, agreements ServiceAgreementStore, profiles CustomerProfileStore, numbers ...InvoiceNumberGenerator) InvoiceService {
+func NewInvoiceService(invoices InvoiceStore, entries TimeEntryStore, agreements ServiceAgreementStore, profiles CustomerProfileStore, optional ...any) InvoiceService {
 	var numberGen InvoiceNumberGenerator
-	if len(numbers) > 0 {
-		numberGen = numbers[0]
+	var issuers DefaultIssuerProfileStore
+	for _, opt := range optional {
+		switch v := opt.(type) {
+		case InvoiceNumberGenerator:
+			numberGen = v
+		case DefaultIssuerProfileStore:
+			issuers = v
+		}
 	}
-	return InvoiceService{invoices: invoices, entries: entries, agreements: agreements, profiles: profiles, numbers: numberGen}
+	return InvoiceService{invoices: invoices, entries: entries, agreements: agreements, profiles: profiles, numbers: numberGen, issuers: issuers}
 }
 
 func (s InvoiceService) CreateDraftFromUnbilled(ctx context.Context, cmd CreateDraftFromUnbilledCommand) (InvoiceDTO, error) {
@@ -68,6 +77,48 @@ func (s InvoiceService) CreateDraftFromUnbilled(ctx context.Context, cmd CreateD
 	}
 	if len(entries) == 0 {
 		return InvoiceDTO{}, ErrNoUnbilledEntries
+	}
+	billableEntries := entries[:0]
+	for _, entry := range entries {
+		if entry.Billable {
+			billableEntries = append(billableEntries, entry)
+		}
+	}
+	if len(billableEntries) == 0 {
+		return InvoiceDTO{}, ErrNoUnbilledEntries
+	}
+	entries = billableEntries
+
+	periodStart, err := parseInvoiceCommandDate(cmd.PeriodStart, "period_start")
+	if err != nil {
+		return InvoiceDTO{}, fmt.Errorf("create invoice draft: %w", err)
+	}
+	periodEnd, err := parseInvoiceCommandDate(cmd.PeriodEnd, "period_end")
+	if err != nil {
+		return InvoiceDTO{}, fmt.Errorf("create invoice draft: %w", err)
+	}
+	dueDate, err := parseInvoiceCommandDate(cmd.DueDate, "due_date")
+	if err != nil {
+		return InvoiceDTO{}, fmt.Errorf("create invoice draft: %w", err)
+	}
+	if periodStart.IsZero() || periodEnd.IsZero() {
+		defaultStart, defaultEnd := invoicePeriodFromEntries(entries)
+		if periodStart.IsZero() {
+			periodStart = defaultStart
+		}
+		if periodEnd.IsZero() {
+			periodEnd = defaultEnd
+		}
+	}
+	notes := cmd.Notes
+	if notes == "" && s.issuers != nil {
+		issuer, err := s.issuers.GetDefault(ctx)
+		if err != nil && !errors.Is(err, ErrIssuerProfileNotFound) {
+			return InvoiceDTO{}, fmt.Errorf("create invoice draft: get issuer default notes: %w", err)
+		}
+		if issuer != nil {
+			notes = issuer.DefaultNotes
+		}
 	}
 
 	lockedEntries := make([]*core.TimeEntry, 0, len(entries))
@@ -101,6 +152,8 @@ func (s InvoiceService) CreateDraftFromUnbilled(ctx context.Context, cmd CreateD
 			InvoiceID:          "inv_seed",
 			ServiceAgreementID: agreement.ID,
 			TimeEntryID:        entry.ID,
+			Description:        entry.Description,
+			QuantityMin:        int64(entry.Hours) * 60 / 10000,
 			UnitRate:           rate,
 		})
 		if err != nil {
@@ -110,10 +163,14 @@ func (s InvoiceService) CreateDraftFromUnbilled(ctx context.Context, cmd CreateD
 	}
 
 	invoice, err := core.NewInvoice(core.InvoiceParams{
-		CustomerID: cmd.CustomerProfileID,
-		Status:     core.InvoiceStatusDraft,
-		Currency:   profile.DefaultCurrency,
-		Lines:      lines,
+		CustomerID:  cmd.CustomerProfileID,
+		Status:      core.InvoiceStatusDraft,
+		Currency:    profile.DefaultCurrency,
+		Lines:       lines,
+		PeriodStart: periodStart,
+		PeriodEnd:   periodEnd,
+		DueDate:     dueDate,
+		Notes:       notes,
 	})
 	if err != nil {
 		return InvoiceDTO{}, fmt.Errorf("create invoice draft: %w", err)
@@ -144,6 +201,9 @@ func (s InvoiceService) GetInvoice(ctx context.Context, id string) (InvoiceDTO, 
 
 	entries := make([]core.TimeEntry, 0, len(inv.Lines))
 	for _, line := range inv.Lines {
+		if strings.TrimSpace(line.TimeEntryID) == "" {
+			continue
+		}
 		entry, err := s.getTimeEntry(ctx, line.TimeEntryID)
 		if err != nil {
 			return InvoiceDTO{}, fmt.Errorf("get invoice: load time entry: %w", err)
@@ -154,6 +214,76 @@ func (s InvoiceService) GetInvoice(ctx context.Context, id string) (InvoiceDTO, 
 	}
 
 	return invoiceToDTO(*inv, entries), nil
+}
+
+func (s InvoiceService) AddDraftLine(ctx context.Context, cmd AddDraftLineCommand) (InvoiceDTO, error) {
+	if strings.TrimSpace(cmd.InvoiceID) == "" {
+		return InvoiceDTO{}, errors.New("invoice id is required")
+	}
+	if s.invoices == nil {
+		return InvoiceDTO{}, errors.New("invoice service dependencies are required")
+	}
+	invoice, err := s.getInvoice(ctx, cmd.InvoiceID)
+	if err != nil {
+		return InvoiceDTO{}, fmt.Errorf("add draft invoice line: %w", err)
+	}
+	if invoice == nil {
+		return InvoiceDTO{}, errors.New("add draft invoice line: invoice is required")
+	}
+	if !invoice.IsDraft() {
+		return InvoiceDTO{}, errors.New("add draft invoice line: invoice is not draft")
+	}
+	if strings.TrimSpace(cmd.Description) == "" {
+		return InvoiceDTO{}, errors.New("add draft invoice line: invoice line description is required")
+	}
+	rate, err := core.NewMoney(cmd.UnitRate, strings.TrimSpace(cmd.Currency))
+	if err != nil {
+		return InvoiceDTO{}, fmt.Errorf("add draft invoice line: %w", err)
+	}
+	serviceAgreementID := "manual"
+	if len(invoice.Lines) > 0 && invoice.Lines[0].ServiceAgreementID != "" {
+		serviceAgreementID = invoice.Lines[0].ServiceAgreementID
+	}
+	line, err := core.NewManualInvoiceLine(invoice.ID, serviceAgreementID, cmd.Description, cmd.QuantityMin, rate, invoice.Currency)
+	if err != nil {
+		return InvoiceDTO{}, fmt.Errorf("add draft invoice line: %w", err)
+	}
+	if err := invoice.AddLine(line); err != nil {
+		return InvoiceDTO{}, fmt.Errorf("add draft invoice line: %w", err)
+	}
+	if err := s.invoices.AddLine(ctx, invoice.ID, line); err != nil {
+		return InvoiceDTO{}, fmt.Errorf("add draft invoice line: save line: %w", err)
+	}
+	return invoiceToDTO(*invoice, nil), nil
+}
+
+func (s InvoiceService) RemoveDraftLine(ctx context.Context, cmd RemoveDraftLineCommand) (InvoiceDTO, error) {
+	if strings.TrimSpace(cmd.InvoiceID) == "" {
+		return InvoiceDTO{}, errors.New("invoice id is required")
+	}
+	if strings.TrimSpace(cmd.InvoiceLineID) == "" {
+		return InvoiceDTO{}, errors.New("invoice line id is required")
+	}
+	if s.invoices == nil {
+		return InvoiceDTO{}, errors.New("invoice service dependencies are required")
+	}
+	invoice, err := s.getInvoice(ctx, cmd.InvoiceID)
+	if err != nil {
+		return InvoiceDTO{}, fmt.Errorf("remove draft invoice line: %w", err)
+	}
+	if invoice == nil {
+		return InvoiceDTO{}, errors.New("remove draft invoice line: invoice is required")
+	}
+	if !invoice.IsDraft() {
+		return InvoiceDTO{}, errors.New("remove draft invoice line: invoice is not draft")
+	}
+	if err := invoice.RemoveLine(cmd.InvoiceLineID); err != nil {
+		return InvoiceDTO{}, fmt.Errorf("remove draft invoice line: %w", err)
+	}
+	if err := s.invoices.RemoveLine(ctx, invoice.ID, strings.TrimSpace(cmd.InvoiceLineID)); err != nil {
+		return InvoiceDTO{}, fmt.Errorf("remove draft invoice line: delete line: %w", err)
+	}
+	return invoiceToDTO(*invoice, nil), nil
 }
 
 func (s InvoiceService) ListInvoices(ctx context.Context, customerID string, statusFilter string) ([]InvoiceSummaryDTO, error) {
@@ -183,11 +313,43 @@ func (s InvoiceService) ListInvoices(ctx context.Context, customerID string, sta
 			CustomerID:    s.CustomerID,
 			Status:        string(s.Status),
 			Currency:      s.Currency,
+			PeriodStart:   formatInvoiceTime(s.PeriodStart),
+			PeriodEnd:     formatInvoiceTime(s.PeriodEnd),
+			DueDate:       formatInvoiceTime(s.DueDate),
 			GrandTotal:    s.GrandTotal,
 			CreatedAt:     formatInvoiceTime(s.CreatedAt),
 		})
 	}
 	return dtos, nil
+}
+
+func parseInvoiceCommandDate(value, field string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	if t, err := time.Parse("2006-01-02", value); err == nil {
+		return t.UTC(), nil
+	}
+	t, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s must be RFC3339 or YYYY-MM-DD", field)
+	}
+	return t.UTC(), nil
+}
+
+func invoicePeriodFromEntries(entries []core.TimeEntry) (time.Time, time.Time) {
+	var start, end time.Time
+	for _, entry := range entries {
+		date := entry.Date.UTC()
+		if start.IsZero() || date.Before(start) {
+			start = date
+		}
+		if end.IsZero() || date.After(end) {
+			end = date
+		}
+	}
+	return start, end
 }
 
 func (s InvoiceService) DiscardDraft(ctx context.Context, invoiceID string) error {
@@ -250,6 +412,9 @@ func (s InvoiceService) IssueDraft(ctx context.Context, cmd IssueInvoiceCommand)
 
 	lockedEntries := make([]core.TimeEntry, 0, len(invoice.Lines))
 	for _, line := range invoice.Lines {
+		if strings.TrimSpace(line.TimeEntryID) == "" {
+			continue
+		}
 		entry, err := s.getTimeEntry(ctx, line.TimeEntryID)
 		if err != nil {
 			return InvoiceDTO{}, fmt.Errorf("issue invoice draft: %w", err)

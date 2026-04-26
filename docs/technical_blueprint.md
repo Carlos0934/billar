@@ -304,7 +304,8 @@ Represents a financial document.
 * `ID`
 * `InvoiceNumber`
 * `CustomerProfileID`
-* `IssueDate`
+* `PeriodStart`
+* `PeriodEnd`
 * `DueDate`
 * `Currency`
 * `Status` (`draft`, `issued`, `discarded`)
@@ -710,9 +711,10 @@ type RecordTimeEntryCommand struct {
 ```go
 type CreateDraftInvoiceFromUnbilledTimeCommand struct {
     CustomerProfileID string
-    From       time.Time
-    To         time.Time
-    Notes      string
+    PeriodStart       string // optional; defaults to earliest selected entry date
+    PeriodEnd         string // optional; defaults to latest selected entry date
+    DueDate           string // optional; no implicit payment term
+    Notes             string // optional; defaults from issuer profile default notes
 }
 ```
 
@@ -768,7 +770,7 @@ billar time add
 billar time list --customer <customer-profile-id>
 billar time list-unbilled --customer <customer-profile-id>
 
-billar invoice draft --customer <customer-profile-id> --from <date> --to <date>
+billar invoice draft --customer-id <customer-profile-id> [--period-start <date>] [--period-end <date>] [--due-date <date>] [--notes <notes>]
 billar invoice issue --id <id>
 billar invoice discard --id <id>
 billar invoice show --id <id>
@@ -795,7 +797,7 @@ billar invoice pdf --id <id>
 * `time_entry.create`
 * `time_entry.list_by_customer_profile`
 * `time_entry.list_unbilled`
-* `invoice.draft`
+* `invoice.draft` — accepts optional `period_start`, `period_end`, `due_date`, and `notes`; omitted period dates default from selected unbilled entries
 * `invoice.issue`
 * `invoice.discard`
 * `invoice.get` — implemented (returns full `InvoiceDTO` with hydrated lines)

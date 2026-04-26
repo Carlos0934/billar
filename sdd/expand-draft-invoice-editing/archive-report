@@ -1,0 +1,76 @@
+# Archive Report: expand-draft-invoice-editing
+
+**Change**: expand-draft-invoice-editing
+**Archived**: 2026-04-26
+**Artifact Store**: engram
+**Verdict at verification**: PASS WITH WARNINGS (accepted in automatic mode)
+
+---
+
+## Artifact Traceability
+
+All SDD artifacts for this change were persisted in Engram. The following observation IDs constitute the audit trail:
+
+| Artifact | Engram ID | Topic Key |
+|----------|-----------|-----------|
+| proposal | #3764 | `sdd/expand-draft-invoice-editing/proposal` |
+| spec | #3767 | `sdd/expand-draft-invoice-editing/spec` |
+| design | #3768 | `sdd/expand-draft-invoice-editing/design` |
+| tasks | #3769 | `sdd/expand-draft-invoice-editing/tasks` |
+| verify-report | #3786 | `sdd/expand-draft-invoice-editing/verify-report` |
+
+---
+
+## Verification Summary
+
+| Metric | Value |
+|--------|-------|
+| Tasks total | 21 |
+| Tasks complete | 21 |
+| Tasks incomplete | 0 |
+| Build | ✅ Passed |
+| Tests | ✅ 31 focused / full suite all green |
+| Coverage | 75.8% total (78.6% changed-files avg, 87.4% excl. tiny provider) |
+| Linter | ✅ go vet clean |
+| TDD Compliance | 6/6 checks passed |
+
+**Verdict**: PASS WITH WARNINGS — accepted in automatic mode.
+
+---
+
+## Warnings Preserved (from verify-report)
+
+These warnings were identified at verification and accepted without remediation:
+
+| # | Warning | Notes |
+|---|---------|-------|
+| W1 | `RemoveDraftLine` has no dedicated behavioral test for a discarded invoice | Issued non-draft is tested; discarded uses the same `!IsDraft()` guard structurally. |
+| W2 | MCP `invoice.line_remove` test verifies structured success/delegation but does not decode/assert the returned structured DTO | Structural success confirmed; DTO content not asserted end-to-end. |
+| W3 | CLI text writers (`writeInvoiceLineAddText`, `writeInvoiceLineRemoveText`) show 0% function coverage | Text format writers untested in the CLI test suite. |
+| W4 | `internal/app/invoice_provider.go` shows 0% coverage as a tiny wrapper | Thin delegation wrapper; not directly exercised by test suite. |
+
+---
+
+## Specs Synced (Engram — no filesystem merge in engram-only mode)
+
+In `engram` artifact store mode, delta specs are not merged into a filesystem main-spec. The spec artifact (`sdd/expand-draft-invoice-editing/spec`, #3767) is the authoritative record of requirements for this change. No filesystem sync was performed.
+
+---
+
+## Archive Contents
+
+The following artifacts constitute the complete change record:
+
+- `sdd/expand-draft-invoice-editing/proposal` ✅ — Engram #3764
+- `sdd/expand-draft-invoice-editing/spec` ✅ — Engram #3767
+- `sdd/expand-draft-invoice-editing/design` ✅ — Engram #3768
+- `sdd/expand-draft-invoice-editing/tasks` ✅ — Engram #3769
+- `sdd/expand-draft-invoice-editing/verify-report` ✅ — Engram #3786
+
+---
+
+## SDD Cycle Complete
+
+Change `expand-draft-invoice-editing` has been fully planned, implemented, verified, and archived.
+
+**Next change**: None pending.

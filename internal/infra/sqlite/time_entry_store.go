@@ -171,7 +171,7 @@ ORDER BY t.date ASC`, customerID)
 	return items, nil
 }
 
-// ListUnbilled returns all time entries with no assigned invoice for the given customer profile,
+// ListUnbilled returns billable time entries with no assigned invoice for the given customer profile,
 // ordered by date ascending. CustomerProfileID is JOIN-derived.
 func (s *TimeEntryStore) ListUnbilled(ctx context.Context, customerID string) ([]core.TimeEntry, error) {
 	if s == nil || s.db == nil {
@@ -184,7 +184,7 @@ SELECT t.id, t.service_agreement_id, sa.customer_profile_id,
        t.date, t.created_at, t.updated_at
 FROM time_entries t
 JOIN service_agreements sa ON t.service_agreement_id = sa.id
-WHERE sa.customer_profile_id = ? AND t.invoice_id IS NULL
+WHERE sa.customer_profile_id = ? AND t.invoice_id IS NULL AND t.billable = 1
 ORDER BY t.date ASC`, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("list unbilled time entries: %w", err)

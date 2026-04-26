@@ -43,10 +43,14 @@ func TestInvoiceStoreCreateDraft(t *testing.T) {
 	})
 
 	invoice, _ := core.NewInvoice(core.InvoiceParams{
-		CustomerID: customerID,
-		Status:     core.InvoiceStatusDraft,
-		Currency:   "USD",
-		Lines:      []core.InvoiceLine{line},
+		CustomerID:  customerID,
+		Status:      core.InvoiceStatusDraft,
+		Currency:    "USD",
+		Lines:       []core.InvoiceLine{line},
+		PeriodStart: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:   time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC),
+		DueDate:     time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC),
+		Notes:       "Net 15",
 	})
 
 	invStore := NewInvoiceStore(store)
@@ -69,6 +73,33 @@ func TestInvoiceStoreCreateDraft(t *testing.T) {
 	}
 	if got.Lines[0].TimeEntryID != entry.ID {
 		t.Fatalf("Line TimeEntryID = %q, want %q", got.Lines[0].TimeEntryID, entry.ID)
+	}
+	if !got.PeriodStart.Equal(invoice.PeriodStart) || !got.PeriodEnd.Equal(invoice.PeriodEnd) || !got.DueDate.Equal(invoice.DueDate) || got.Notes != "Net 15" {
+		t.Fatalf("metadata = (%s,%s,%s,%q), want (%s,%s,%s,%q)", got.PeriodStart, got.PeriodEnd, got.DueDate, got.Notes, invoice.PeriodStart, invoice.PeriodEnd, invoice.DueDate, invoice.Notes)
+	}
+}
+
+func TestInvoiceStoreGetByIDPreMetadataRow(t *testing.T) {
+	t.Parallel()
+
+	store, err := Open("")
+	if err != nil {
+		t.Fatalf("Open(): %v", err)
+	}
+	defer store.Close()
+	customerID, _ := seedCustomerAndAgreement(t, store)
+	now := time.Now().UTC().UnixNano()
+	_, err = store.DB().Exec(`INSERT INTO invoices (id, invoice_number, customer_id, status, currency, created_at, updated_at) VALUES ('inv_legacy', '', ?, 'draft', 'USD', ?, ?)`, customerID, now, now)
+	if err != nil {
+		t.Fatalf("insert legacy invoice: %v", err)
+	}
+
+	got, err := NewInvoiceStore(store).GetByID(context.Background(), "inv_legacy")
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if !got.PeriodStart.IsZero() || !got.PeriodEnd.IsZero() || !got.DueDate.IsZero() || got.Notes != "" {
+		t.Fatalf("legacy metadata = (%s,%s,%s,%q), want zero dates and empty notes", got.PeriodStart, got.PeriodEnd, got.DueDate, got.Notes)
 	}
 }
 
@@ -510,6 +541,61 @@ func TestInvoiceStoreDelete_IsAtomic(t *testing.T) {
 	}
 }
 
+func TestInvoiceStoreAddLineRemoveLineAndSnapshotTotals(t *testing.T) {
+	t.Parallel()
+
+	store, err := Open("")
+	if err != nil {
+		t.Fatalf("Open(): %v", err)
+	}
+	defer store.Close()
+	customerID, agreementID := seedCustomerAndAgreement(t, store)
+	teStore := NewTimeEntryStore(store)
+	entry := &core.TimeEntry{ID: "te_edit_001", ServiceAgreementID: agreementID, CustomerProfileID: customerID, Description: "Original work", Hours: mustHours(12000), Billable: true, Date: time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	if err := teStore.Save(context.Background(), entry); err != nil {
+		t.Fatalf("save entry: %v", err)
+	}
+	rate, _ := core.NewMoney(6000, "USD")
+	line, _ := core.NewInvoiceLine(core.InvoiceLineParams{InvoiceID: "inv_seed", ServiceAgreementID: agreementID, TimeEntryID: entry.ID, UnitRate: rate, Description: entry.Description, QuantityMin: 72})
+	invoice, _ := core.NewInvoice(core.InvoiceParams{CustomerID: customerID, Status: core.InvoiceStatusDraft, Currency: "USD", Lines: []core.InvoiceLine{line}})
+	invStore := NewInvoiceStore(store)
+	if err := invStore.CreateDraft(context.Background(), &invoice, []*core.TimeEntry{entry}); err != nil {
+		t.Fatalf("CreateDraft() error = %v", err)
+	}
+	manual, _ := core.NewManualInvoiceLine(invoice.ID, agreementID, "Manual setup", 60, core.Money{Amount: 3000, Currency: "USD"}, "USD")
+	if err := invStore.AddLine(context.Background(), invoice.ID, manual); err != nil {
+		t.Fatalf("AddLine() error = %v", err)
+	}
+	got, err := invStore.GetByID(context.Background(), invoice.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if len(got.Lines) != 2 || got.Lines[1].TimeEntryID != "" || got.Lines[1].Description != "Manual setup" || got.Lines[1].QuantityMin != 60 {
+		t.Fatalf("manual line after GetByID = %+v", got.Lines)
+	}
+	summaries, err := invStore.ListByCustomer(context.Background(), customerID)
+	if err != nil {
+		t.Fatalf("ListByCustomer() error = %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].GrandTotal != 10200 {
+		t.Fatalf("snapshot summary = %+v, want total 10200", summaries)
+	}
+	if err := invStore.RemoveLine(context.Background(), invoice.ID, line.ID); err != nil {
+		t.Fatalf("RemoveLine() error = %v", err)
+	}
+	entryAfter, err := teStore.GetByID(context.Background(), entry.ID)
+	if err != nil {
+		t.Fatalf("Get entry after RemoveLine: %v", err)
+	}
+	if entryAfter.InvoiceID != "" {
+		t.Fatalf("entry InvoiceID = %q, want unlocked", entryAfter.InvoiceID)
+	}
+	got, _ = invStore.GetByID(context.Background(), invoice.ID)
+	if len(got.Lines) != 1 || got.Lines[0].ID != manual.ID {
+		t.Fatalf("lines after remove = %+v, want only manual", got.Lines)
+	}
+}
+
 // seedCustomerAndAgreement creates a minimal customer profile and service agreement for testing.
 func seedCustomerAndAgreement(t *testing.T, store *Store) (customerID, agreementID string) {
 	t.Helper()
@@ -695,7 +781,7 @@ func TestInvoiceStoreListByCustomer(t *testing.T) {
 		t.Fatalf("save entry1: %v", err)
 	}
 	line1, _ := core.NewInvoiceLine(core.InvoiceLineParams{InvoiceID: "inv_seed", ServiceAgreementID: agreementID, TimeEntryID: entry1.ID, UnitRate: rate})
-	inv1, _ := core.NewInvoice(core.InvoiceParams{CustomerID: customerID, Status: core.InvoiceStatusDraft, Currency: "USD", Lines: []core.InvoiceLine{line1}})
+	inv1, _ := core.NewInvoice(core.InvoiceParams{CustomerID: customerID, Status: core.InvoiceStatusDraft, Currency: "USD", Lines: []core.InvoiceLine{line1}, PeriodStart: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), PeriodEnd: time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), DueDate: time.Date(2026, 4, 20, 0, 0, 0, 0, time.UTC)})
 	invStore := NewInvoiceStore(store)
 	if err := invStore.CreateDraft(context.Background(), &inv1, []*core.TimeEntry{entry1}); err != nil {
 		t.Fatalf("CreateDraft inv1: %v", err)
@@ -734,6 +820,13 @@ func TestInvoiceStoreListByCustomer(t *testing.T) {
 	}
 	if totals[inv2.ID] != 30000 {
 		t.Fatalf("inv2 GrandTotal = %d, want 30000", totals[inv2.ID])
+	}
+	metadata := map[string]core.InvoiceSummary{}
+	for _, s := range summaries {
+		metadata[s.ID] = s
+	}
+	if !metadata[inv1.ID].PeriodStart.Equal(inv1.PeriodStart) || !metadata[inv1.ID].PeriodEnd.Equal(inv1.PeriodEnd) || !metadata[inv1.ID].DueDate.Equal(inv1.DueDate) {
+		t.Fatalf("inv1 summary metadata = (%s,%s,%s), want (%s,%s,%s)", metadata[inv1.ID].PeriodStart, metadata[inv1.ID].PeriodEnd, metadata[inv1.ID].DueDate, inv1.PeriodStart, inv1.PeriodEnd, inv1.DueDate)
 	}
 
 	// List with status filter = draft → both

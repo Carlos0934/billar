@@ -14,7 +14,9 @@ import (
 	mcpconnector "github.com/Carlos0934/billar/internal/connectors/mcp"
 	mcphttpconnector "github.com/Carlos0934/billar/internal/connectors/mcphttp"
 	"github.com/Carlos0934/billar/internal/infra/config"
+	"github.com/Carlos0934/billar/internal/infra/exportfs"
 	"github.com/Carlos0934/billar/internal/infra/logging"
+	"github.com/Carlos0934/billar/internal/infra/pdf"
 	infrasqlite "github.com/Carlos0934/billar/internal/infra/sqlite"
 )
 
@@ -35,7 +37,9 @@ func newServer(authCfg config.AuthConfig, appCfg config.Config, store *infrasqli
 	customerProfileService := app.NewCustomerProfileService(legalEntityStore, customerProfileStore)
 	agreementService := app.NewAgreementService(agreementStore, customerProfileStore)
 	timeEntryService := app.NewTimeEntryService(timeEntryStore, customerProfileStore, agreementStore)
-	invoiceService := app.NewInvoiceService(invoiceStore, timeEntryStore, agreementStore, customerProfileStore, invoiceSequenceStore)
+	invoiceService := app.NewInvoiceService(invoiceStore, timeEntryStore, agreementStore, customerProfileStore, invoiceSequenceStore, issuerProfileStore)
+	invoicePDFService := app.NewInvoicePDFService(invoiceStore, timeEntryStore, customerProfileStore, issuerProfileStore, legalEntityStore, pdf.Renderer{}, exportfs.RootedWriter{Root: appCfg.ExportDir})
+	invoiceProvider := app.NewInvoiceProvider(invoiceService, invoicePDFService)
 
 	mcpSessionService := app.NewRequestSessionService(app.ContextIdentitySource{})
 	healthService := app.NewHealthService(appCfg.AppName)
@@ -46,7 +50,7 @@ func newServer(authCfg config.AuthConfig, appCfg config.Config, store *infrasqli
 		customerProfileService,
 		agreementService,
 		timeEntryService,
-		invoiceService,
+		invoiceProvider,
 		logger,
 	)
 	mcpAuthMiddleware := mcphttpconnector.NewAPIKeyAuthMiddleware(authCfg.APIKeys, logger)
@@ -69,9 +73,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	appCfg := config.Load()
+	appCfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
-	store, err := infrasqlite.Open(os.Getenv("BILLAR_DB_PATH"))
+	store, err := openConfiguredStore(appCfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -103,4 +111,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func openConfiguredStore(cfg config.Config) (*infrasqlite.Store, error) {
+	store, err := infrasqlite.Open(cfg.DBPath)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite database at %q: %w; set BILLAR_DB_PATH to choose a writable database path", cfg.DBPath, err)
+	}
+	return store, nil
 }

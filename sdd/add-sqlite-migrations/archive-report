@@ -1,0 +1,88 @@
+# Archive Report — add-sqlite-migrations
+
+**Change**: add-sqlite-migrations
+**Archived**: 2026-04-25
+**Mode**: engram
+**Verdict at archive**: PASS WITH WARNINGS (accepted in automatic mode)
+
+---
+
+## Artifact IDs (Traceability)
+
+| Artifact | Observation ID | Topic Key |
+|----------|---------------|-----------|
+| Proposal | #3676 | sdd/add-sqlite-migrations/proposal |
+| Spec | #3679 | sdd/add-sqlite-migrations/spec |
+| Design | #3680 | sdd/add-sqlite-migrations/design |
+| Tasks | #3681 | sdd/add-sqlite-migrations/tasks |
+| Verify Report | #3690 | sdd/add-sqlite-migrations/verify-report |
+
+Additional related observations:
+- #3688 (architecture) — Implemented SQLite migrations runner (implementation summary)
+- #3689 (session_summary) — Implementation session
+- #3691 (session_summary) — Verification session
+- #3694 (session_summary) — Re-verification session after corrective fixes
+
+---
+
+## Spec Sync (Engram Mode)
+
+No filesystem sync performed. All artifacts live in Engram. The main spec for the `sqlite-migrations` domain is tracked via the spec artifact (#3679) which serves as the authoritative specification for this change.
+
+---
+
+## Archive Contents
+
+### Proposal (Obs #3676)
+Versioned SQLite schema upgrade path. Replaces single `CREATE TABLE IF NOT EXISTS` bootstrap with a migration runner in `internal/infra/sqlite`. Scope: migration runner, `schema_migrations` table, baseline version 1 for fresh and existing DBs.
+
+### Spec (Obs #3679)
+8 requirements: Fresh Database Baseline, Existing Current-Schema Baseline (2 scenarios), Migration Version Table, Idempotent Open, Ordered Transactional Application, Failure Rollback, Layer Isolation, Clear Error Reporting. Compliance: 8/9 compliant, 1 partial (Clear Error Reporting — bootstrap/current-version/commit paths statically wrapped but not directly induced).
+
+### Design (Obs #3680)
+Replace `schema.sql` exec with embedded SQL migrations via `embed.FS`. `NNNN_name.sql` convention, `schema_migrations` table with version/name/applied_at. One tx per migration, abort on first error. Baseline detection via `sqlite_master` probe. 7 architecture decisions recorded.
+
+### Tasks (Obs #3681)
+30 tasks across 4 phases. All complete. Strict TDD followed: RED tests (2.1–2.9) before GREEN implementation (3.1–3.10). Verification (4.1–4.4) confirmed full suite green.
+
+### Verify Report (Obs #3690)
+- Build: ✅ Passed
+- Tests: ✅ 812 passed / 0 failed
+- Coverage: sqlite package 77.2% (no project threshold; store.go at 65.9% — below 80%)
+- TDD Compliance: 6/6 checks passed
+- Spec Compliance: 8/9 scenarios compliant, 1 partial
+- Static correctness: All 8 requirements implemented
+- Coherence: All 7 design decisions followed
+
+---
+
+## Warnings Preserved at Archive
+
+The following warnings from the verification report are acknowledged and accepted; no corrective action is required before archive:
+
+1. **metadata/current-version/commit error paths not directly induced** — Error wrapping for these phases is statically present in code but behavioral tests only directly exercise load/apply/version failure paths. Not blocking.
+
+2. **store.go coverage below 80%** — `internal/infra/sqlite/store.go` at 65.9% statements. Uncovered ranges are temp-file/directory/open/error cleanup paths. Not blocking; existing tests provide safety net.
+
+3. **unrelated working tree changes** — Working tree contains many pre-existing modifications outside this SDD scope. Audit attribution is noisy but tests/build pass. Not blocking.
+
+---
+
+## Source of Truth
+
+The spec (#3679) now reflects the new behavior. All requirements are implemented per the design (#3680). Future migrations (e.g., invoice metadata, PDF storage fields) will land as `0002_*.sql` in a separate change.
+
+---
+
+## SDD Cycle Complete
+
+All phases completed:
+- ✅ Propose (sdd-propose)
+- ✅ Spec (sdd-spec)
+- ✅ Design (sdd-design)
+- ✅ Tasks (sdd-tasks)
+- ✅ Apply (sdd-apply) — strict TDD, 30/30 tasks
+- ✅ Verify (sdd-verify) — PASS WITH WARNINGS
+- ✅ Archive (this phase)
+
+Ready for the next change.

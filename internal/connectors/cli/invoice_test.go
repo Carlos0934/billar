@@ -3,7 +3,10 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,6 +28,15 @@ type stubInvoiceService struct {
 	getInvoiceErr   error
 	listInvoicesRes []app.InvoiceSummaryDTO
 	listInvoicesErr error
+	pdfArg          *app.RenderInvoicePDFCommand
+	pdfRes          app.RenderedFileDTO
+	pdfErr          error
+	addLineArg      *app.AddDraftLineCommand
+	addLineRes      app.InvoiceDTO
+	addLineErr      error
+	removeLineArg   *app.RemoveDraftLineCommand
+	removeLineRes   app.InvoiceDTO
+	removeLineErr   error
 }
 
 func (s *stubInvoiceService) CreateDraftFromUnbilled(ctx context.Context, cmd app.CreateDraftFromUnbilledCommand) (app.InvoiceDTO, error) {
@@ -56,6 +68,24 @@ func (s *stubInvoiceService) ListInvoices(ctx context.Context, customerID string
 	return s.listInvoicesRes, s.listInvoicesErr
 }
 
+func (s *stubInvoiceService) RenderInvoicePDF(ctx context.Context, cmd app.RenderInvoicePDFCommand) (app.RenderedFileDTO, error) {
+	_ = ctx
+	s.pdfArg = &cmd
+	return s.pdfRes, s.pdfErr
+}
+
+func (s *stubInvoiceService) AddDraftLine(ctx context.Context, cmd app.AddDraftLineCommand) (app.InvoiceDTO, error) {
+	_ = ctx
+	s.addLineArg = &cmd
+	return s.addLineRes, s.addLineErr
+}
+
+func (s *stubInvoiceService) RemoveDraftLine(ctx context.Context, cmd app.RemoveDraftLineCommand) (app.InvoiceDTO, error) {
+	_ = ctx
+	s.removeLineArg = &cmd
+	return s.removeLineRes, s.removeLineErr
+}
+
 func newTestInvoiceCommand(svc InvoiceServiceProvider) Command {
 	return NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, nil, nil, nil, svc, false)
 }
@@ -74,9 +104,9 @@ func TestInvoiceDraftCommand(t *testing.T) {
 		{
 			name: "creates draft successfully",
 			service: &stubInvoiceService{
-				draftRes: app.InvoiceDTO{ID: "inv_001", CustomerID: "cus_1", Status: "draft", IsDraft: true},
+				draftRes: app.InvoiceDTO{ID: "inv_001", CustomerID: "cus_1", Status: "draft", IsDraft: true, PeriodStart: "2026-04-01T00:00:00Z", PeriodEnd: "2026-04-30T00:00:00Z", DueDate: "2026-05-15T00:00:00Z", Notes: "Net 15"},
 			},
-			args:        []string{"invoice", "draft", "--customer-id", "cus_1"},
+			args:        []string{"invoice", "draft", "--customer-id", "cus_1", "--period-start", "2026-04-01", "--period-end", "2026-04-30", "--due-date", "2026-05-15", "--notes", "Net 15"},
 			wantContain: "inv_001",
 		},
 		{
@@ -122,8 +152,128 @@ func TestInvoiceDraftCommand(t *testing.T) {
 			if tc.wantContain != "" && !strings.Contains(out.String(), tc.wantContain) {
 				t.Fatalf("Run() output = %q, want contains %q", out.String(), tc.wantContain)
 			}
+			if tc.service.draftArg != nil && tc.service.draftArg.PeriodStart != "2026-04-01" {
+				t.Fatalf("draft arg = %+v, want metadata flags passed through", tc.service.draftArg)
+			}
 		})
 	}
+}
+
+func TestInvoiceLineCommands(t *testing.T) {
+	t.Parallel()
+
+	updated := app.InvoiceDTO{ID: "inv_001", CustomerID: "cus_1", Status: "draft", Currency: "USD", IsDraft: true, Lines: []app.InvoiceLineDTO{{ID: "inl_manual", Description: "Setup fee", QuantityMin: 60, UnitRateAmount: 5000, UnitRateCurrency: "USD", LineTotalAmount: 5000, LineTotalCurrency: "USD"}}, Subtotal: 5000, GrandTotal: 5000}
+	tests := []struct {
+		name        string
+		svc         *stubInvoiceService
+		args        []string
+		wantErr     string
+		wantJSON    bool
+		wantAdd     *app.AddDraftLineCommand
+		wantRemove  *app.RemoveDraftLineCommand
+		wantContain string
+	}{
+		{name: "add json canonical dto", svc: &stubInvoiceService{addLineRes: updated}, args: []string{"invoice", "line", "add", "inv_001", "--description", "Setup fee", "--minutes", "60", "--rate", "5000", "--currency", "USD", "--format", "json"}, wantJSON: true, wantAdd: &app.AddDraftLineCommand{InvoiceID: "inv_001", Description: "Setup fee", QuantityMin: 60, UnitRate: 5000, Currency: "USD"}},
+		{name: "remove toon canonical dto", svc: &stubInvoiceService{removeLineRes: updated}, args: []string{"invoice", "line", "remove", "inv_001", "inl_manual", "--format", "toon"}, wantRemove: &app.RemoveDraftLineCommand{InvoiceID: "inv_001", InvoiceLineID: "inl_manual"}, wantContain: "grand_total"},
+		{name: "add validation error", svc: &stubInvoiceService{}, args: []string{"invoice", "line", "add", "inv_001", "--minutes", "60", "--rate", "5000", "--currency", "USD"}, wantErr: "--description is required"},
+		{name: "remove service error", svc: &stubInvoiceService{removeLineErr: errors.New("invoice is not draft")}, args: []string{"invoice", "line", "remove", "inv_001", "inl_manual"}, wantErr: "invoice is not draft"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var out bytes.Buffer
+			err := newTestInvoiceCommand(tc.svc).Run(context.Background(), tc.args, &out)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Run() error = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if tc.wantAdd != nil && (tc.svc.addLineArg == nil || *tc.svc.addLineArg != *tc.wantAdd) {
+				t.Fatalf("add arg = %+v, want %+v", tc.svc.addLineArg, tc.wantAdd)
+			}
+			if tc.wantRemove != nil && (tc.svc.removeLineArg == nil || *tc.svc.removeLineArg != *tc.wantRemove) {
+				t.Fatalf("remove arg = %+v, want %+v", tc.svc.removeLineArg, tc.wantRemove)
+			}
+			if tc.wantJSON {
+				var dto app.InvoiceDTO
+				if err := json.Unmarshal(out.Bytes(), &dto); err != nil {
+					t.Fatalf("json output invalid: %v", err)
+				}
+				if dto.ID != "inv_001" || dto.GrandTotal != 5000 || len(dto.Lines) != 1 || dto.Lines[0].Description != "Setup fee" {
+					t.Fatalf("json dto = %+v, want canonical invoice with manual line", dto)
+				}
+			}
+			if tc.wantContain != "" && !strings.Contains(out.String(), tc.wantContain) {
+				t.Fatalf("output = %q, want %q", out.String(), tc.wantContain)
+			}
+		})
+	}
+}
+
+func TestInvoicePDFCommandWritesConfirmationFormats(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "inv_001.pdf")
+	formats := []string{"text", "json", "toon"}
+	for _, format := range formats {
+		format := format
+		t.Run(format, func(t *testing.T) {
+			svc := &stubInvoiceService{pdfRes: app.RenderedFileDTO{InvoiceID: "inv_001", Filename: "inv_001.pdf", Path: outPath, MimeType: "application/pdf", SizeBytes: 9}}
+			var out bytes.Buffer
+			cmd := newTestInvoiceCommand(svc)
+			err := cmd.Run(context.Background(), []string{"invoice", "pdf", "inv_001", "--out", outPath, "--format", format}, &out)
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if svc.pdfArg == nil || svc.pdfArg.InvoiceID != "inv_001" || svc.pdfArg.OutputPath != outPath {
+				t.Fatalf("pdf arg = %+v", svc.pdfArg)
+			}
+			if !strings.Contains(out.String(), "inv_001.pdf") || !strings.Contains(out.String(), "application/pdf") {
+				t.Fatalf("output = %q, want metadata", out.String())
+			}
+			if format == "json" {
+				var dto app.RenderedFileDTO
+				if err := json.Unmarshal(out.Bytes(), &dto); err != nil {
+					t.Fatalf("json output invalid: %v", err)
+				}
+				if dto.SizeBytes != 9 || dto.Path != outPath {
+					t.Fatalf("json dto = %+v", dto)
+				}
+			}
+		})
+	}
+}
+
+func TestInvoicePDFCommandRejectsMissingArgumentsAndPropagatesErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		svc  *stubInvoiceService
+		want string
+	}{
+		{"missing invoice id", []string{"invoice", "pdf", "--out", "x.pdf"}, &stubInvoiceService{}, "invoice id is required"},
+		{"missing out", []string{"invoice", "pdf", "inv_001"}, &stubInvoiceService{}, "--out is required"},
+		{"write error", []string{"invoice", "pdf", "inv_001", "--out", filepath.Join(t.TempDir(), "missing", "x.pdf")}, &stubInvoiceService{pdfErr: errors.New("write file: no such file or directory")}, "write file"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			err := newTestInvoiceCommand(tc.svc).Run(context.Background(), tc.args, &out)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Run() error = %v, want %q", err, tc.want)
+			}
+			if out.Len() != 0 {
+				t.Fatalf("output = %q, want empty on error", out.String())
+			}
+		})
+	}
+	_ = os.ErrNotExist
 }
 
 func TestInvoiceIssueCommand(t *testing.T) {
@@ -296,6 +446,9 @@ func TestInvoiceShowCommand(t *testing.T) {
 		"Customer: cus_1\n" +
 		"Status: issued\n" +
 		"Currency: USD\n" +
+		"Period: 2026-04-01T00:00:00Z — 2026-04-30T00:00:00Z\n" +
+		"Due Date: 2026-05-15T00:00:00Z\n" +
+		"Notes: Net 15\n" +
 		"\n" +
 		"Lines\n" +
 		"─────\n" +
@@ -320,7 +473,7 @@ func TestInvoiceShowCommand(t *testing.T) {
 			name: "show invoice text layout exact",
 			service: &stubInvoiceService{
 				getInvoiceRes: app.InvoiceDTO{
-					ID: "inv_001", InvoiceNumber: "INV-001", CustomerID: "cus_1", Status: "issued", Currency: "USD",
+					ID: "inv_001", InvoiceNumber: "INV-001", CustomerID: "cus_1", Status: "issued", Currency: "USD", PeriodStart: "2026-04-01T00:00:00Z", PeriodEnd: "2026-04-30T00:00:00Z", DueDate: "2026-05-15T00:00:00Z", Notes: "Net 15",
 					Lines: []app.InvoiceLineDTO{
 						{Description: "Consulting", QuantityMin: 90, UnitRateAmount: 10000, UnitRateCurrency: "USD", LineTotalAmount: 15000, LineTotalCurrency: "USD"},
 					},
@@ -391,9 +544,9 @@ func TestInvoiceListCommand(t *testing.T) {
 		"Customer: cus_1\n" +
 		"Count: 2\n" +
 		"\n" +
-		"Number           Status       Currency   Total\n" +
-		"INV-001          issued       USD        15000\n" +
-		"—                draft        USD        3000\n"
+		"Number           Status       Period                       Due Date              Currency   Total\n" +
+		"INV-001          issued       2026-04-01T00:00:00Z–2026-04-30T00:00:00Z 2026-05-15T00:00:00Z  USD        15000\n" +
+		"—                draft        –                            –                     USD        3000\n"
 
 	wantFilterExact := "Invoices\n" +
 		"────────\n" +
@@ -401,8 +554,8 @@ func TestInvoiceListCommand(t *testing.T) {
 		"Status: draft\n" +
 		"Count: 1\n" +
 		"\n" +
-		"Number           Status       Currency   Total\n" +
-		"—                draft        USD        3000\n"
+		"Number           Status       Period                       Due Date              Currency   Total\n" +
+		"—                draft        –                            –                     USD        3000\n"
 
 	tests := []struct {
 		name          string
@@ -416,7 +569,7 @@ func TestInvoiceListCommand(t *testing.T) {
 			name: "list with results exact",
 			service: &stubInvoiceService{
 				listInvoicesRes: []app.InvoiceSummaryDTO{
-					{ID: "inv_001", InvoiceNumber: "INV-001", CustomerID: "cus_1", Status: "issued", Currency: "USD", GrandTotal: 15000},
+					{ID: "inv_001", InvoiceNumber: "INV-001", CustomerID: "cus_1", Status: "issued", Currency: "USD", PeriodStart: "2026-04-01T00:00:00Z", PeriodEnd: "2026-04-30T00:00:00Z", DueDate: "2026-05-15T00:00:00Z", GrandTotal: 15000},
 					{ID: "inv_002", InvoiceNumber: "", CustomerID: "cus_1", Status: "draft", Currency: "USD", GrandTotal: 3000},
 				},
 			},

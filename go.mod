@@ -3,6 +3,7 @@ module github.com/Carlos0934/billar
 go 1.25.8
 
 require (
+	codeberg.org/go-pdf/fpdf v0.11.1
 	github.com/mark3labs/mcp-go v0.46.0
 	github.com/toon-format/toon-go v0.0.0-20251202084852-7ca0e27c4e8c
 	modernc.org/sqlite v1.48.1

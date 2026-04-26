@@ -416,6 +416,105 @@ func TestTimeEntryStoreListUnbilledReturnsOnlyUnbilledEntries(t *testing.T) {
 	}
 }
 
+func TestTimeEntryStoreListUnbilledExcludesNonBillableEntries(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t)
+	newTimeEntryFixture(t, store.DB(), "le_te_ub_billable", "cus_te_ub_billable", "sa_te_ub_billable")
+	teStore := NewTimeEntryStore(store)
+
+	now := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	hours, _ := core.NewHours(60)
+
+	insertTimeEntry(t, store.DB(), core.TimeEntry{
+		ID:                 "te_billable_open",
+		ServiceAgreementID: "sa_te_ub_billable",
+		Description:        "Billable unbilled work",
+		Hours:              hours,
+		Billable:           true,
+		Date:               now,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	})
+	insertTimeEntry(t, store.DB(), core.TimeEntry{
+		ID:                 "te_nonbillable_open",
+		ServiceAgreementID: "sa_te_ub_billable",
+		Description:        "Non-billable unbilled work",
+		Hours:              hours,
+		Billable:           false,
+		Date:               now.Add(time.Minute),
+		CreatedAt:          now.Add(time.Minute),
+		UpdatedAt:          now.Add(time.Minute),
+	})
+	insertTimeEntry(t, store.DB(), core.TimeEntry{
+		ID:                 "te_billable_billed",
+		ServiceAgreementID: "sa_te_ub_billable",
+		Description:        "Billable billed work",
+		Hours:              hours,
+		Billable:           true,
+		InvoiceID:          "inv_789",
+		Date:               now.Add(2 * time.Minute),
+		CreatedAt:          now.Add(2 * time.Minute),
+		UpdatedAt:          now.Add(2 * time.Minute),
+	})
+
+	results, err := teStore.ListUnbilled(context.Background(), "cus_te_ub_billable")
+	if err != nil {
+		t.Fatalf("ListUnbilled() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("ListUnbilled() len = %d, want 1", len(results))
+	}
+	if results[0].ID != "te_billable_open" {
+		t.Fatalf("ListUnbilled() entry ID = %q, want te_billable_open", results[0].ID)
+	}
+	if !results[0].Billable {
+		t.Fatal("ListUnbilled() returned non-billable entry, want billable only")
+	}
+	if results[0].InvoiceID != "" {
+		t.Fatalf("ListUnbilled() entry InvoiceID = %q, want empty", results[0].InvoiceID)
+	}
+}
+
+func TestTimeEntryStoreListUnbilledReturnsEmptyWhenOnlyNonBillable(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t)
+	newTimeEntryFixture(t, store.DB(), "le_te_only_nonbillable", "cus_te_only_nonbillable", "sa_te_only_nonbillable")
+	teStore := NewTimeEntryStore(store)
+
+	now := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	hours, _ := core.NewHours(60)
+	insertTimeEntry(t, store.DB(), core.TimeEntry{
+		ID:                 "te_only_nonbillable_001",
+		ServiceAgreementID: "sa_te_only_nonbillable",
+		Description:        "Non-billable unbilled work",
+		Hours:              hours,
+		Billable:           false,
+		Date:               now,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	})
+	insertTimeEntry(t, store.DB(), core.TimeEntry{
+		ID:                 "te_only_nonbillable_002",
+		ServiceAgreementID: "sa_te_only_nonbillable",
+		Description:        "More non-billable unbilled work",
+		Hours:              hours,
+		Billable:           false,
+		Date:               now.Add(time.Minute),
+		CreatedAt:          now.Add(time.Minute),
+		UpdatedAt:          now.Add(time.Minute),
+	})
+
+	results, err := teStore.ListUnbilled(context.Background(), "cus_te_only_nonbillable")
+	if err != nil {
+		t.Fatalf("ListUnbilled() error = %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("ListUnbilled() len = %d, want 0 (only non-billable unbilled)", len(results))
+	}
+}
+
 func TestTimeEntryStoreListUnbilledReturnsEmptyWhenAllBilled(t *testing.T) {
 	t.Parallel()
 

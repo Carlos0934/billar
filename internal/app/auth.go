@@ -15,4 +15,3 @@ type AuthenticatedIdentity struct {
 	Subject       string
 	Issuer        string
 }
-

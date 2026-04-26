@@ -106,7 +106,7 @@ REQUIRED FIELDS:
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(serviceAgreementCreateText(result)), nil
+		return mcp.NewToolResultStructured(result, serviceAgreementCreateText(result)), nil
 	}
 }
 
@@ -133,7 +133,7 @@ func serviceAgreementGetTool(service AgreementServiceProvider, logger *slog.Logg
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(serviceAgreementGetText(result)), nil
+		return mcp.NewToolResultStructured(result, serviceAgreementGetText(result)), nil
 	}
 }
 
@@ -160,7 +160,10 @@ func serviceAgreementListTool(service AgreementServiceProvider, logger *slog.Log
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(serviceAgreementListText(results)), nil
+		if results == nil {
+			results = []app.ServiceAgreementDTO{}
+		}
+		return mcp.NewToolResultStructured(results, serviceAgreementListText(results)), nil
 	}
 }
 
@@ -196,7 +199,7 @@ func serviceAgreementUpdateRateTool(service AgreementServiceProvider, logger *sl
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(serviceAgreementUpdateRateText(result)), nil
+		return mcp.NewToolResultStructured(result, serviceAgreementUpdateRateText(result)), nil
 	}
 }
 
@@ -223,7 +226,7 @@ func serviceAgreementActivateTool(service AgreementServiceProvider, logger *slog
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(serviceAgreementActivateText(result)), nil
+		return mcp.NewToolResultStructured(result, serviceAgreementActivateText(result)), nil
 	}
 }
 
@@ -250,7 +253,7 @@ func serviceAgreementDeactivateTool(service AgreementServiceProvider, logger *sl
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(serviceAgreementDeactivateText(result)), nil
+		return mcp.NewToolResultStructured(result, serviceAgreementDeactivateText(result)), nil
 	}
 }
 

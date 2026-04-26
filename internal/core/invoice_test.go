@@ -94,6 +94,79 @@ func TestInvoiceLineLineTotal(t *testing.T) {
 	}
 }
 
+func TestNewManualInvoiceLineAndSnapshotTotals(t *testing.T) {
+	t.Parallel()
+
+	usdRate, _ := NewMoney(5000, "USD")
+	eurRate, _ := NewMoney(5000, "EUR")
+	tests := []struct {
+		name          string
+		description   string
+		quantityMin   int64
+		rate          Money
+		invoiceCurr   string
+		wantErrSubstr string
+	}{
+		{name: "valid manual line", description: "Setup fee", quantityMin: 60, rate: usdRate, invoiceCurr: "USD"},
+		{name: "blank description", description: "  ", quantityMin: 60, rate: usdRate, invoiceCurr: "USD", wantErrSubstr: "description"},
+		{name: "zero quantity", description: "Setup fee", quantityMin: 0, rate: usdRate, invoiceCurr: "USD", wantErrSubstr: "quantity"},
+		{name: "zero rate", description: "Setup fee", quantityMin: 60, rate: Money{Currency: "USD"}, invoiceCurr: "USD", wantErrSubstr: "unit rate"},
+		{name: "currency mismatch", description: "Setup fee", quantityMin: 60, rate: eurRate, invoiceCurr: "USD", wantErrSubstr: "currency"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			line, err := NewManualInvoiceLine("inv_123", "Setup fee", tt.description, tt.quantityMin, tt.rate, tt.invoiceCurr)
+			if tt.wantErrSubstr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrSubstr) {
+					t.Fatalf("NewManualInvoiceLine() error = %v, want %q", err, tt.wantErrSubstr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NewManualInvoiceLine() error = %v", err)
+			}
+			if line.TimeEntryID != "" || line.Description != "Setup fee" || line.QuantityMin != 60 {
+				t.Fatalf("line snapshot = %+v, want manual Setup fee 60min", line)
+			}
+			if got := line.LineTotal(); got.Amount != 5000 || got.Currency != "USD" {
+				t.Fatalf("LineTotal() = %+v, want 5000 USD", got)
+			}
+		})
+	}
+}
+
+func TestInvoiceAddAndRemoveLineInvariants(t *testing.T) {
+	t.Parallel()
+
+	rate, _ := NewMoney(6000, "USD")
+	base, _ := NewManualInvoiceLine("inv_seed", "sa_123", "Base", 60, rate, "USD")
+	extra, _ := NewManualInvoiceLine("inv_seed", "sa_123", "Extra", 30, rate, "USD")
+	invoice, err := NewInvoice(InvoiceParams{CustomerID: "cus_123", Status: InvoiceStatusDraft, Currency: "USD", Lines: []InvoiceLine{base}})
+	if err != nil {
+		t.Fatalf("NewInvoice() error = %v", err)
+	}
+	if err := invoice.AddLine(extra); err != nil {
+		t.Fatalf("AddLine() error = %v", err)
+	}
+	if len(invoice.Lines) != 2 || invoice.Lines[1].InvoiceID != invoice.ID {
+		t.Fatalf("Lines after AddLine = %+v, want appended with invoice id %q", invoice.Lines, invoice.ID)
+	}
+	if err := invoice.RemoveLine(extra.ID); err != nil {
+		t.Fatalf("RemoveLine(extra) error = %v", err)
+	}
+	if len(invoice.Lines) != 1 || invoice.Lines[0].ID != base.ID {
+		t.Fatalf("Lines after RemoveLine = %+v, want only base", invoice.Lines)
+	}
+	if err := invoice.RemoveLine(base.ID); err == nil || !strings.Contains(err.Error(), "last") {
+		t.Fatalf("RemoveLine(last) error = %v, want final-line rejection", err)
+	}
+	if err := invoice.AddLine(InvoiceLine{ID: "inl_eur", UnitRate: Money{Amount: 1, Currency: "EUR"}, QuantityMin: 1, Description: "bad"}); err == nil || !strings.Contains(err.Error(), "currency") {
+		t.Fatalf("AddLine(currency mismatch) error = %v, want currency rejection", err)
+	}
+}
+
 func TestNewInvoice(t *testing.T) {
 	t.Parallel()
 
@@ -154,6 +227,76 @@ func TestNewInvoice(t *testing.T) {
 	_, err = NewInvoice(InvoiceParams{CustomerID: "cus_123", Status: InvoiceStatusDraft, Currency: "USD", Lines: []InvoiceLine{badLine}})
 	if err == nil {
 		t.Fatal("NewInvoice() error = nil, want currency mismatch rejected")
+	}
+}
+
+func TestNewInvoiceMetadataValidation(t *testing.T) {
+	t.Parallel()
+
+	rate, err := NewMoney(10000, "USD")
+	if err != nil {
+		t.Fatalf("NewMoney(): %v", err)
+	}
+	line, err := NewInvoiceLine(InvoiceLineParams{InvoiceID: "inv_seed", ServiceAgreementID: "sa_123", TimeEntryID: "te_123", UnitRate: rate})
+	if err != nil {
+		t.Fatalf("NewInvoiceLine(): %v", err)
+	}
+	periodStart := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name    string
+		params  InvoiceParams
+		wantErr string
+	}{
+		{
+			name:   "accepts explicit metadata",
+			params: InvoiceParams{CustomerID: "cus_123", Status: InvoiceStatusDraft, Currency: "USD", Lines: []InvoiceLine{line}, PeriodStart: periodStart, PeriodEnd: periodEnd, DueDate: periodEnd.AddDate(0, 0, 15), Notes: "Net 15"},
+		},
+		{
+			name:   "accepts unset period and due date",
+			params: InvoiceParams{CustomerID: "cus_123", Status: InvoiceStatusDraft, Currency: "USD", Lines: []InvoiceLine{line}, Notes: ""},
+		},
+		{
+			name:    "rejects period end before start",
+			params:  InvoiceParams{CustomerID: "cus_123", Status: InvoiceStatusDraft, Currency: "USD", Lines: []InvoiceLine{line}, PeriodStart: periodEnd, PeriodEnd: periodStart},
+			wantErr: "period_end must be on or after period_start",
+		},
+		{
+			name:    "rejects due date before period end",
+			params:  InvoiceParams{CustomerID: "cus_123", Status: InvoiceStatusDraft, Currency: "USD", Lines: []InvoiceLine{line}, PeriodStart: periodStart, PeriodEnd: periodEnd, DueDate: periodStart},
+			wantErr: "due_date must be on or after period_end",
+		},
+		{
+			name:    "rejects due date before period start when end unset",
+			params:  InvoiceParams{CustomerID: "cus_123", Status: InvoiceStatusDraft, Currency: "USD", Lines: []InvoiceLine{line}, PeriodStart: periodStart, DueDate: periodStart.AddDate(0, 0, -1)},
+			wantErr: "due_date must be on or after period_start",
+		},
+		{
+			name:    "rejects notes over maximum length",
+			params:  InvoiceParams{CustomerID: "cus_123", Status: InvoiceStatusDraft, Currency: "USD", Lines: []InvoiceLine{line}, Notes: strings.Repeat("x", 4001)},
+			wantErr: "invoice notes must be 4000 characters or fewer",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			invoice, err := NewInvoice(tt.params)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("NewInvoice() error = %v, want substring %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NewInvoice() error = %v", err)
+			}
+			if !invoice.PeriodStart.Equal(tt.params.PeriodStart) || !invoice.PeriodEnd.Equal(tt.params.PeriodEnd) || !invoice.DueDate.Equal(tt.params.DueDate) || invoice.Notes != tt.params.Notes {
+				t.Fatalf("metadata = (%s,%s,%s,%q), want (%s,%s,%s,%q)", invoice.PeriodStart, invoice.PeriodEnd, invoice.DueDate, invoice.Notes, tt.params.PeriodStart, tt.params.PeriodEnd, tt.params.DueDate, tt.params.Notes)
+			}
+		})
 	}
 }
 

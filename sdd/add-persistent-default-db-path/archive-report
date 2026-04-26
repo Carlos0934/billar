@@ -1,0 +1,98 @@
+# Archive Report — add-persistent-default-db-path
+
+**Change**: add-persistent-default-db-path
+**Archived**: 2026-04-26
+**Mode**: engram
+**Verdict at verify**: PASS WITH WARNINGS (acceptable in automatic mode)
+
+---
+
+## Artifacts Retrieved (Observation IDs for Traceability)
+
+| Artifact | Engram ID | Topic Key |
+|----------|-----------|-----------|
+| Proposal | #3659 | sdd/add-persistent-default-db-path/proposal |
+| Spec | #3661 | sdd/add-persistent-default-db-path/spec |
+| Design | #3662 | sdd/add-persistent-default-db-path/design |
+| Tasks | #3663 | sdd/add-persistent-default-db-path/tasks |
+| Apply Progress | #3664 | sdd/add-persistent-default-db-path/apply-progress |
+| Verify Report | #3668 | sdd/add-persistent-default-db-path/verify-report |
+
+---
+
+## Spec Sync (Engram Mode)
+
+No filesystem sync performed. All artifacts live in Engram only. The spec (#3661) is the permanent authoritative record.
+
+---
+
+## What Was Built
+
+Prevented silent data loss when `BILLAR_DB_PATH` is unset. CLI and MCP now resolve a durable per-user SQLite path by default while preserving explicit override.
+
+### Requirements Delivered (11/11 spec scenarios compliant)
+
+| Requirement | Status |
+|-------------|--------|
+| Explicit Path Override (`BILLAR_DB_PATH` honored when non-empty) | ✅ |
+| Whitespace-only `BILLAR_DB_PATH` treated as unset | ✅ |
+| XDG_DATA_HOME default (`$XDG_DATA_HOME/billar/billar.db`) | ✅ |
+| UserConfigDir fallback (`os.UserConfigDir()/billar/billar.db`) | ✅ |
+| HOME final fallback (`$HOME/.local/share/billar/billar.db`) | ✅ |
+| Default directory creation (mode 0700) | ✅ |
+| Directory creation failure surfaces actionable error | ✅ |
+| No resolvable base → config error with `BILLAR_DB_PATH` hint | ✅ |
+| CLI wired to `cfg.DBPath` (no direct env read for DB open) | ✅ |
+| MCP wired to `cfg.DBPath` (no direct env read for DB open) | ✅ |
+| `sqlite.Open("")` preserved for tests (ephemeral temp DB) | ✅ |
+| README + `.env.example` document resolution order and override | ✅ |
+
+---
+
+## Warnings Preserved (Automatic Mode Acceptance)
+
+Per orchestrator instruction, these warnings are preserved and do not block archive:
+
+1. **Stale design prose** — Design artifact (#3662) contains HOME-before-UserConfigDir language superseded by spec-corrective implementation. Implementation correctly follows spec order (XDG → UserConfigDir → HOME). Design serves as audit input; spec (#3661) is authoritative.
+
+2. **Changed-file coverage** — `cmd/cli/main.go` (78.4%), `cmd/mcp-http/main.go` (75.6%), `internal/infra/sqlite/store.go` (57.4%) below 80%. Root cause: untested error-handling branches. Build and smoke tests confirm functional correctness.
+
+3. **Unrelated working-tree changes** — Working tree has uncommitted changes from other sessions. Verification applied to current combined tree; implementation artifacts for this change are correct.
+
+---
+
+## Files Changed
+
+| File | Role |
+|------|------|
+| `internal/infra/config/config.go` | Added `DBPath`, changed `Load()` to `(Config, error)`, `ensureDefaultDBParentDir` |
+| `internal/infra/config/config_test.go` | New signature, directory creation/error tests |
+| `internal/infra/config/dbpath.go` | `resolveDBPathWith` resolver (pure, stdlib-only) |
+| `internal/infra/config/dbpath_test.go` | Table tests for precedence and error cases |
+| `cmd/cli/main.go` | Uses `cfg.DBPath`, wraps SQLite open errors |
+| `cmd/mcp-http/main.go` | Uses `cfg.DBPath`, wraps SQLite open errors |
+| `cmd/cli/main_test.go` | Entrypoint error-surface tests |
+| `cmd/mcp-http/main_test.go` | Entrypoint error-surface tests |
+| `internal/infra/sqlite/store.go` | Directory mode 0700, error propagation |
+| `internal/infra/sqlite/store_test.go` | Blank-path regression, mode regression |
+| `README.md` | Documents resolution order, example, override |
+| `.env.example` | Documents `BILLAR_DB_PATH` override |
+
+---
+
+## Verification Evidence
+
+- `make test`: ✅ All packages pass (796 tests)
+- `make build`: ✅ Both binaries build
+- `make fmt`: ✅ No diff
+- `go vet ./...`: ✅ No issues
+- CLI smoke (health + customer list, unset `BILLAR_DB_PATH`): ✅ DB created at resolved default path
+
+---
+
+## Archive Decision
+
+**Status**: Archived ✅
+**Reason**: PASS WITH WARNINGS in automatic mode. 16/16 tasks complete. 11/11 spec scenarios compliant. No critical issues.
+
+**SDD Cycle Complete**: Proposal → Spec → Design → Tasks → Apply → Verify → Archive

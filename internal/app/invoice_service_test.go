@@ -23,6 +23,12 @@ type invoiceStoreStub struct {
 	listByCustomerRes          []core.InvoiceSummary
 	listByCustomerErr          error
 	listByCustomerStatusFilter string
+	addLineInvoiceID           string
+	addLineLine                core.InvoiceLine
+	addLineErr                 error
+	removeLineInvoiceID        string
+	removeLineID               string
+	removeLineErr              error
 }
 
 func (s *invoiceStoreStub) CreateDraft(ctx context.Context, invoice *core.Invoice, entries []*core.TimeEntry) error {
@@ -57,10 +63,38 @@ func (s *invoiceStoreStub) ListByCustomer(ctx context.Context, customerID string
 	return s.listByCustomerRes, s.listByCustomerErr
 }
 
+func (s *invoiceStoreStub) AddLine(ctx context.Context, invoiceID string, line core.InvoiceLine) error {
+	_ = ctx
+	s.addLineInvoiceID = invoiceID
+	s.addLineLine = line
+	return s.addLineErr
+}
+
+func (s *invoiceStoreStub) RemoveLine(ctx context.Context, invoiceID, lineID string) error {
+	_ = ctx
+	s.removeLineInvoiceID = invoiceID
+	s.removeLineID = lineID
+	return s.removeLineErr
+}
+
 type invoiceNumberGeneratorStub struct {
 	next      string
 	err       error
 	callCount int
+}
+
+type defaultIssuerProfileStoreStub struct {
+	profile *core.IssuerProfile
+	err     error
+}
+
+func (s *defaultIssuerProfileStoreStub) Save(context.Context, *core.IssuerProfile) error { return nil }
+func (s *defaultIssuerProfileStoreStub) GetByID(context.Context, string) (*core.IssuerProfile, error) {
+	return s.profile, s.err
+}
+func (s *defaultIssuerProfileStoreStub) Delete(context.Context, string) error { return nil }
+func (s *defaultIssuerProfileStoreStub) GetDefault(context.Context) (*core.IssuerProfile, error) {
+	return s.profile, s.err
 }
 
 func (s *invoiceNumberGeneratorStub) Next(ctx context.Context) (string, error) {
@@ -117,6 +151,117 @@ func TestInvoiceServiceCreateDraftFromUnbilled_HappyPath(t *testing.T) {
 		if err := invoices.createDraftEntries[0].Update("should fail", hours1); !errors.Is(err, core.ErrTimeEntryLocked) {
 			t.Fatalf("locked entry Update() error = %v, want ErrTimeEntryLocked", err)
 		}
+	}
+}
+
+func TestInvoiceServiceCreateDraftFromUnbilled_Metadata(t *testing.T) {
+	t.Parallel()
+
+	issuer, _ := core.NewIssuerProfile(core.IssuerProfileParams{LegalEntityID: "le_issuer", DefaultCurrency: "USD", DefaultNotes: "Net 15"})
+	tests := []struct {
+		name      string
+		cmd       CreateDraftFromUnbilledCommand
+		issuer    *core.IssuerProfile
+		wantStart string
+		wantEnd   string
+		wantDue   string
+		wantNotes string
+		wantErr   string
+	}{
+		{name: "explicit metadata wins", cmd: CreateDraftFromUnbilledCommand{CustomerProfileID: "cus_abc123", PeriodStart: "2026-04-01", PeriodEnd: "2026-04-30", DueDate: "2026-05-15", Notes: "Custom terms"}, issuer: &issuer, wantStart: "2026-04-01T00:00:00Z", wantEnd: "2026-04-30T00:00:00Z", wantDue: "2026-05-15T00:00:00Z", wantNotes: "Custom terms"},
+		{name: "period defaults to min max and notes from issuer", cmd: CreateDraftFromUnbilledCommand{CustomerProfileID: "cus_abc123"}, issuer: &issuer, wantStart: "2026-04-02T00:00:00Z", wantEnd: "2026-04-18T00:00:00Z", wantNotes: "Net 15"},
+		{name: "missing issuer defaults notes empty", cmd: CreateDraftFromUnbilledCommand{CustomerProfileID: "cus_abc123"}, issuer: nil, wantStart: "2026-04-02T00:00:00Z", wantEnd: "2026-04-18T00:00:00Z", wantNotes: ""},
+		{name: "reject invalid period", cmd: CreateDraftFromUnbilledCommand{CustomerProfileID: "cus_abc123", PeriodStart: "2026-05-01", PeriodEnd: "2026-04-30"}, issuer: &issuer, wantErr: "period_end"},
+		{name: "reject due before period", cmd: CreateDraftFromUnbilledCommand{CustomerProfileID: "cus_abc123", PeriodEnd: "2026-04-30", DueDate: "2026-04-15"}, issuer: &issuer, wantErr: "due_date"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			profiles, agreements, entries, invoices := makeInvoiceServiceFixtures()
+			entries.listUnbilledRes = []core.TimeEntry{
+				{ID: "te_early", CustomerProfileID: "cus_abc123", ServiceAgreementID: "sa_xyz789", Description: "Early", Hours: mustHours(10000), Billable: true, Date: time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)},
+				{ID: "te_late", CustomerProfileID: "cus_abc123", ServiceAgreementID: "sa_xyz789", Description: "Late", Hours: mustHours(10000), Billable: true, Date: time.Date(2026, 4, 18, 0, 0, 0, 0, time.UTC)},
+			}
+			svc := NewInvoiceService(invoices, entries, agreements, profiles, &defaultIssuerProfileStoreStub{profile: tc.issuer})
+			dto, err := svc.CreateDraftFromUnbilled(context.Background(), tc.cmd)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("CreateDraftFromUnbilled() error = %v, want %q", err, tc.wantErr)
+				}
+				if invoices.createDraftInvoice != nil || len(invoices.createDraftEntries) != 0 {
+					t.Fatalf("invalid metadata wrote invoice=%#v entries=%d", invoices.createDraftInvoice, len(invoices.createDraftEntries))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CreateDraftFromUnbilled() error = %v", err)
+			}
+			if dto.PeriodStart != tc.wantStart || dto.PeriodEnd != tc.wantEnd || dto.DueDate != tc.wantDue || dto.Notes != tc.wantNotes {
+				t.Fatalf("dto metadata = (%q,%q,%q,%q), want (%q,%q,%q,%q)", dto.PeriodStart, dto.PeriodEnd, dto.DueDate, dto.Notes, tc.wantStart, tc.wantEnd, tc.wantDue, tc.wantNotes)
+			}
+			if invoices.createDraftInvoice == nil || invoices.createDraftInvoice.Notes != tc.wantNotes {
+				t.Fatalf("stored invoice metadata = %#v", invoices.createDraftInvoice)
+			}
+		})
+	}
+}
+
+func TestInvoiceServiceCreateDraftFromUnbilled_SkipsNonBillableEntries(t *testing.T) {
+	t.Parallel()
+
+	profiles, agreements, entries, invoices := makeInvoiceServiceFixtures()
+	entries.listUnbilledRes = []core.TimeEntry{
+		{ID: "te_billable_001", CustomerProfileID: "cus_abc123", ServiceAgreementID: "sa_xyz789", Description: "Billable work", Hours: mustHours(9000), Billable: true, Date: time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC)},
+		{ID: "te_nonbillable_001", CustomerProfileID: "cus_abc123", ServiceAgreementID: "sa_xyz789", Description: "Internal admin", Hours: mustHours(6000), Billable: false, Date: time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC)},
+	}
+
+	svc := NewInvoiceService(invoices, entries, agreements, profiles)
+	dto, err := svc.CreateDraftFromUnbilled(context.Background(), CreateDraftFromUnbilledCommand{CustomerProfileID: "cus_abc123"})
+	if err != nil {
+		t.Fatalf("CreateDraftFromUnbilled() error = %v", err)
+	}
+	if len(dto.Lines) != 1 {
+		t.Fatalf("len(Lines) = %d, want 1 billable line", len(dto.Lines))
+	}
+	if dto.Lines[0].TimeEntryID != "te_billable_001" {
+		t.Fatalf("Lines[0].TimeEntryID = %q, want te_billable_001", dto.Lines[0].TimeEntryID)
+	}
+	if dto.Lines[0].Description != "Billable work" {
+		t.Fatalf("Lines[0].Description = %q, want Billable work", dto.Lines[0].Description)
+	}
+	if len(invoices.createDraftEntries) != 1 {
+		t.Fatalf("len(createDraftEntries) = %d, want 1 locked billable entry", len(invoices.createDraftEntries))
+	}
+	if invoices.createDraftEntries[0].ID != "te_billable_001" {
+		t.Fatalf("locked entry ID = %q, want te_billable_001", invoices.createDraftEntries[0].ID)
+	}
+	if !invoices.createDraftEntries[0].Billable {
+		t.Fatal("locked entry is non-billable, want billable only")
+	}
+}
+
+func TestInvoiceServiceCreateDraftFromUnbilled_ReturnsNoUnbilledWhenOnlyNonBillable(t *testing.T) {
+	t.Parallel()
+
+	profiles, agreements, entries, invoices := makeInvoiceServiceFixtures()
+	agreements.getByIDErr = errors.New("agreement lookup should not run for non-billable entries")
+	entries.listUnbilledRes = []core.TimeEntry{
+		{ID: "te_nonbillable_001", CustomerProfileID: "cus_abc123", ServiceAgreementID: "sa_xyz789", Description: "Internal admin", Hours: mustHours(6000), Billable: false, Date: time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC)},
+		{ID: "te_nonbillable_002", CustomerProfileID: "cus_abc123", ServiceAgreementID: "sa_xyz789", Description: "Sales support", Hours: mustHours(3000), Billable: false, Date: time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)},
+	}
+
+	svc := NewInvoiceService(invoices, entries, agreements, profiles)
+	_, err := svc.CreateDraftFromUnbilled(context.Background(), CreateDraftFromUnbilledCommand{CustomerProfileID: "cus_abc123"})
+	if !errors.Is(err, ErrNoUnbilledEntries) {
+		t.Fatalf("CreateDraftFromUnbilled() error = %v, want ErrNoUnbilledEntries", err)
+	}
+	if invoices.createDraftInvoice != nil {
+		t.Fatalf("CreateDraft invoice = %#v, want no invoice write", invoices.createDraftInvoice)
+	}
+	if len(invoices.createDraftEntries) != 0 {
+		t.Fatalf("len(createDraftEntries) = %d, want 0 locked entries", len(invoices.createDraftEntries))
 	}
 }
 
@@ -264,6 +409,51 @@ func TestInvoiceServiceIssueDraft(t *testing.T) {
 	}
 }
 
+func TestInvoiceServiceIssueDraft_PreservesMetadataFromCreatedDraft(t *testing.T) {
+	t.Parallel()
+
+	profiles, agreements, entries, invoices := makeInvoiceServiceFixtures()
+	entry := core.TimeEntry{ID: "te_001", CustomerProfileID: "cus_abc123", ServiceAgreementID: "sa_xyz789", Description: "Metadata work", Hours: mustHours(15000), Billable: true, Date: time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC)}
+	entries.listUnbilledRes = []core.TimeEntry{entry}
+	entries.getByIDRes = &entry
+	issuer, _ := core.NewIssuerProfile(core.IssuerProfileParams{LegalEntityID: "le_issuer", DefaultCurrency: "USD", DefaultNotes: "Issuer default must not replace explicit notes"})
+	svc := NewInvoiceService(invoices, entries, agreements, profiles, &invoiceNumberGeneratorStub{next: "INV-2026-0001"}, &defaultIssuerProfileStoreStub{profile: &issuer})
+
+	draft, err := svc.CreateDraftFromUnbilled(context.Background(), CreateDraftFromUnbilledCommand{
+		CustomerProfileID: "cus_abc123",
+		PeriodStart:       "2026-04-01",
+		PeriodEnd:         "2026-04-30",
+		DueDate:           "2026-05-15",
+		Notes:             "Keep these billing notes",
+	})
+	if err != nil {
+		t.Fatalf("CreateDraftFromUnbilled() error = %v", err)
+	}
+	if invoices.createDraftInvoice == nil {
+		t.Fatal("CreateDraft was not called")
+	}
+	beforeStart, beforeEnd, beforeDue, beforeNotes := draft.PeriodStart, draft.PeriodEnd, draft.DueDate, draft.Notes
+
+	invoices.getByIDRes = invoices.createDraftInvoice
+	issued, err := svc.IssueDraft(context.Background(), IssueInvoiceCommand{InvoiceID: invoices.createDraftInvoice.ID})
+	if err != nil {
+		t.Fatalf("IssueDraft() error = %v", err)
+	}
+
+	if issued.InvoiceNumber != "INV-2026-0001" {
+		t.Fatalf("InvoiceNumber = %q, want INV-2026-0001", issued.InvoiceNumber)
+	}
+	if issued.PeriodStart != beforeStart || issued.PeriodEnd != beforeEnd || issued.DueDate != beforeDue || issued.Notes != beforeNotes {
+		t.Fatalf("issued metadata = (%q,%q,%q,%q), want unchanged (%q,%q,%q,%q)", issued.PeriodStart, issued.PeriodEnd, issued.DueDate, issued.Notes, beforeStart, beforeEnd, beforeDue, beforeNotes)
+	}
+	if invoices.updateInvoice == nil {
+		t.Fatal("Update was not called")
+	}
+	if gotStart, gotEnd, gotDue, gotNotes := formatInvoiceTime(invoices.updateInvoice.PeriodStart), formatInvoiceTime(invoices.updateInvoice.PeriodEnd), formatInvoiceTime(invoices.updateInvoice.DueDate), invoices.updateInvoice.Notes; gotStart != beforeStart || gotEnd != beforeEnd || gotDue != beforeDue || gotNotes != beforeNotes {
+		t.Fatalf("stored issued metadata = (%q,%q,%q,%q), want unchanged (%q,%q,%q,%q)", gotStart, gotEnd, gotDue, gotNotes, beforeStart, beforeEnd, beforeDue, beforeNotes)
+	}
+}
+
 func TestInvoiceServiceIssueDraft_Rejections(t *testing.T) {
 	t.Parallel()
 
@@ -319,6 +509,124 @@ func TestInvoiceServiceIssueDraft_StoreUpdateFailure(t *testing.T) {
 	}
 	if invoices.updateInvoice == nil || invoices.updateInvoice.Status != core.InvoiceStatusIssued {
 		t.Fatalf("update invoice state = %#v, want issued invoice before update failure", invoices.updateInvoice)
+	}
+}
+
+func TestInvoiceServiceAddDraftLine(t *testing.T) {
+	t.Parallel()
+
+	rate, _ := core.NewMoney(10000, "USD")
+	base, _ := core.NewInvoiceLine(core.InvoiceLineParams{InvoiceID: "inv_seed", ServiceAgreementID: "sa_xyz789", TimeEntryID: "te_001", UnitRate: rate, Description: "Base work", QuantityMin: 60})
+	invoice, _ := core.NewInvoice(core.InvoiceParams{CustomerID: "cus_abc123", Status: core.InvoiceStatusDraft, Currency: "USD", Lines: []core.InvoiceLine{base}})
+	invoice.ID = "inv_001"
+	invoice.Lines[0].InvoiceID = invoice.ID
+	invoices := &invoiceStoreStub{getByIDRes: &invoice}
+	svc := NewInvoiceService(invoices, &timeEntryStoreStub{}, nil, nil)
+
+	dto, err := svc.AddDraftLine(context.Background(), AddDraftLineCommand{InvoiceID: "inv_001", Description: "Setup fee", QuantityMin: 60, UnitRate: 5000, Currency: "USD"})
+	if err != nil {
+		t.Fatalf("AddDraftLine() error = %v", err)
+	}
+	if invoices.addLineInvoiceID != "inv_001" {
+		t.Fatalf("AddLine invoice id = %q, want inv_001", invoices.addLineInvoiceID)
+	}
+	if invoices.addLineLine.TimeEntryID != "" || invoices.addLineLine.Description != "Setup fee" || invoices.addLineLine.QuantityMin != 60 || invoices.addLineLine.UnitRate.Amount != 5000 {
+		t.Fatalf("added line = %+v, want manual snapshot", invoices.addLineLine)
+	}
+	if len(dto.Lines) != 2 || dto.GrandTotal != 15000 {
+		t.Fatalf("dto lines/total = %d/%d, want 2/15000", len(dto.Lines), dto.GrandTotal)
+	}
+	if dto.Lines[1].TimeEntryID != "" || dto.Lines[1].Description != "Setup fee" || dto.Lines[1].LineTotalAmount != 5000 {
+		t.Fatalf("manual dto line = %+v", dto.Lines[1])
+	}
+}
+
+func TestInvoiceServiceAddDraftLineRejections(t *testing.T) {
+	t.Parallel()
+
+	base := invoiceWithSingleLine("inv_001", "te_001", core.InvoiceStatusDraft)
+	tests := []struct {
+		name    string
+		invoice *core.Invoice
+		cmd     AddDraftLineCommand
+		want    string
+	}{
+		{name: "issued immutable", invoice: invoiceWithSingleLine("inv_001", "te_001", core.InvoiceStatusIssued), cmd: AddDraftLineCommand{InvoiceID: "inv_001", Description: "Setup", QuantityMin: 60, UnitRate: 5000, Currency: "USD"}, want: "not draft"},
+		{name: "discarded immutable", invoice: invoiceWithSingleLine("inv_001", "te_001", core.InvoiceStatusDiscarded), cmd: AddDraftLineCommand{InvoiceID: "inv_001", Description: "Setup", QuantityMin: 60, UnitRate: 5000, Currency: "USD"}, want: "not draft"},
+		{name: "currency mismatch", invoice: base, cmd: AddDraftLineCommand{InvoiceID: "inv_001", Description: "Setup", QuantityMin: 60, UnitRate: 5000, Currency: "EUR"}, want: "currency"},
+		{name: "bad input", invoice: base, cmd: AddDraftLineCommand{InvoiceID: "inv_001", Description: " ", QuantityMin: 0, UnitRate: 0, Currency: "USD"}, want: "description"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			invoices := &invoiceStoreStub{getByIDRes: tc.invoice}
+			svc := NewInvoiceService(invoices, &timeEntryStoreStub{}, nil, nil)
+			_, err := svc.AddDraftLine(context.Background(), tc.cmd)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("AddDraftLine() error = %v, want %q", err, tc.want)
+			}
+			if invoices.addLineInvoiceID != "" {
+				t.Fatalf("AddLine called for rejected command: %+v", invoices.addLineLine)
+			}
+		})
+	}
+}
+
+func TestInvoiceServiceRemoveDraftLine(t *testing.T) {
+	t.Parallel()
+
+	rate, _ := core.NewMoney(10000, "USD")
+	line1, _ := core.NewInvoiceLine(core.InvoiceLineParams{InvoiceID: "inv_seed", ServiceAgreementID: "sa_xyz789", TimeEntryID: "te_001", UnitRate: rate, Description: "Base work", QuantityMin: 60})
+	line2, _ := core.NewManualInvoiceLine("inv_seed", "sa_xyz789", "Setup fee", 60, core.Money{Amount: 5000, Currency: "USD"}, "USD")
+	invoice, _ := core.NewInvoice(core.InvoiceParams{CustomerID: "cus_abc123", Status: core.InvoiceStatusDraft, Currency: "USD", Lines: []core.InvoiceLine{line1, line2}})
+	invoice.ID = "inv_001"
+	for i := range invoice.Lines {
+		invoice.Lines[i].InvoiceID = invoice.ID
+	}
+	invoices := &invoiceStoreStub{getByIDRes: &invoice}
+	svc := NewInvoiceService(invoices, &timeEntryStoreStub{}, nil, nil)
+
+	dto, err := svc.RemoveDraftLine(context.Background(), RemoveDraftLineCommand{InvoiceID: "inv_001", InvoiceLineID: line2.ID})
+	if err != nil {
+		t.Fatalf("RemoveDraftLine() error = %v", err)
+	}
+	if invoices.removeLineInvoiceID != "inv_001" || invoices.removeLineID != line2.ID {
+		t.Fatalf("RemoveLine args = %q/%q, want inv_001/%s", invoices.removeLineInvoiceID, invoices.removeLineID, line2.ID)
+	}
+	if len(dto.Lines) != 1 || dto.Lines[0].ID != line1.ID || dto.GrandTotal != 10000 {
+		t.Fatalf("dto after remove = %+v, want only line1 total 10000", dto)
+	}
+}
+
+func TestInvoiceServiceRemoveDraftLineRejections(t *testing.T) {
+	t.Parallel()
+
+	draft := invoiceWithSingleLine("inv_001", "te_001", core.InvoiceStatusDraft)
+	tests := []struct {
+		name    string
+		invoice *core.Invoice
+		lineID  string
+		want    string
+	}{
+		{name: "last line", invoice: draft, lineID: draft.Lines[0].ID, want: "last"},
+		{name: "unknown line", invoice: draft, lineID: "inl_missing", want: "not found"},
+		{name: "issued immutable", invoice: invoiceWithSingleLine("inv_001", "te_001", core.InvoiceStatusIssued), lineID: "anything", want: "not draft"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			invoices := &invoiceStoreStub{getByIDRes: tc.invoice}
+			svc := NewInvoiceService(invoices, &timeEntryStoreStub{}, nil, nil)
+			_, err := svc.RemoveDraftLine(context.Background(), RemoveDraftLineCommand{InvoiceID: "inv_001", InvoiceLineID: tc.lineID})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("RemoveDraftLine() error = %v, want %q", err, tc.want)
+			}
+			if invoices.removeLineInvoiceID != "" {
+				t.Fatalf("RemoveLine called for rejected command: %q/%q", invoices.removeLineInvoiceID, invoices.removeLineID)
+			}
+		})
 	}
 }
 
@@ -494,7 +802,7 @@ func TestInvoiceServiceListInvoices_HappyPath(t *testing.T) {
 	t.Parallel()
 
 	summaries := []core.InvoiceSummary{
-		{ID: "inv_001", InvoiceNumber: "INV-001", Status: core.InvoiceStatusIssued, Currency: "USD", GrandTotal: 5000},
+		{ID: "inv_001", InvoiceNumber: "INV-001", Status: core.InvoiceStatusIssued, Currency: "USD", GrandTotal: 5000, PeriodStart: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), PeriodEnd: time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC), DueDate: time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)},
 		{ID: "inv_002", InvoiceNumber: "", Status: core.InvoiceStatusDraft, Currency: "USD", GrandTotal: 3000},
 	}
 	invoices := &invoiceStoreStub{listByCustomerRes: summaries}
@@ -512,6 +820,9 @@ func TestInvoiceServiceListInvoices_HappyPath(t *testing.T) {
 	}
 	if dtos[1].Status != "draft" {
 		t.Fatalf("dtos[1].Status = %q, want draft", dtos[1].Status)
+	}
+	if dtos[0].PeriodStart != "2026-04-01T00:00:00Z" || dtos[0].PeriodEnd != "2026-04-30T00:00:00Z" || dtos[0].DueDate != "2026-05-15T00:00:00Z" {
+		t.Fatalf("summary metadata = (%q,%q,%q)", dtos[0].PeriodStart, dtos[0].PeriodEnd, dtos[0].DueDate)
 	}
 }
 

@@ -125,3 +125,25 @@ func (s *IssuerProfileStore) GetByID(ctx context.Context, id string) (*core.Issu
 
 	return &profile, nil
 }
+
+func (s *IssuerProfileStore) GetDefault(ctx context.Context) (*core.IssuerProfile, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("issuer profile sqlite store is required")
+	}
+
+	query := `SELECT id, legal_entity_id, default_currency, default_notes, created_at, updated_at FROM issuer_profiles ORDER BY created_at ASC, id ASC LIMIT 1`
+	row := s.db.QueryRowContext(ctx, query)
+
+	var profile core.IssuerProfile
+	var createdAt int64
+	var updatedAt int64
+	if err := row.Scan(&profile.ID, &profile.LegalEntityID, &profile.DefaultCurrency, &profile.DefaultNotes, &createdAt, &updatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, app.ErrIssuerProfileNotFound
+		}
+		return nil, fmt.Errorf("get default issuer profile: %w", err)
+	}
+	profile.CreatedAt = time.Unix(0, createdAt).UTC()
+	profile.UpdatedAt = time.Unix(0, updatedAt).UTC()
+	return &profile, nil
+}

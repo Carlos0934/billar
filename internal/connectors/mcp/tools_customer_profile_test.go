@@ -31,6 +31,9 @@ type customerProfileWriteServiceStub struct {
 	createArg *app.CreateCustomerProfileCommand
 	createRes app.CustomerProfileDTO
 	createErr error
+	getID     string
+	getRes    app.CustomerProfileDTO
+	getErr    error
 	updateID  string
 	updateArg *app.PatchCustomerProfileCommand
 	updateRes app.CustomerProfileDTO
@@ -47,7 +50,8 @@ func (s *customerProfileWriteServiceStub) Create(ctx context.Context, cmd app.Cr
 
 func (s *customerProfileWriteServiceStub) Get(ctx context.Context, id string) (app.CustomerProfileDTO, error) {
 	_ = ctx
-	return app.CustomerProfileDTO{}, errors.New("not implemented in test stub")
+	s.getID = id
+	return s.getRes, s.getErr
 }
 
 func (s *customerProfileWriteServiceStub) Update(ctx context.Context, id string, cmd app.PatchCustomerProfileCommand) (app.CustomerProfileDTO, error) {

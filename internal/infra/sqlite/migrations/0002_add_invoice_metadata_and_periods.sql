@@ -1,0 +1,4 @@
+ALTER TABLE invoices ADD COLUMN period_start INTEGER;
+ALTER TABLE invoices ADD COLUMN period_end INTEGER;
+ALTER TABLE invoices ADD COLUMN due_date INTEGER;
+ALTER TABLE invoices ADD COLUMN notes TEXT NOT NULL DEFAULT '';

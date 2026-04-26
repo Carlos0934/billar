@@ -109,7 +109,7 @@ OPTIONAL FIELDS:
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(issuerProfileCreateText(result)), nil
+		return mcp.NewToolResultStructured(result, issuerProfileCreateText(result)), nil
 	}
 }
 
@@ -136,7 +136,7 @@ func issuerProfileGetTool(service IssuerProfileWriteProvider, logger *slog.Logge
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(issuerProfileGetText(result)), nil
+		return mcp.NewToolResultStructured(result, issuerProfileGetText(result)), nil
 	}
 }
 
@@ -212,7 +212,7 @@ are cascaded to the linked legal entity when provided.`),
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(issuerProfileUpdateText(result)), nil
+		return mcp.NewToolResultStructured(result, issuerProfileUpdateText(result)), nil
 	}
 }
 
@@ -238,7 +238,7 @@ func issuerProfileDeleteTool(service IssuerProfileWriteProvider, logger *slog.Lo
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("Issuer profile deleted: %s", id)), nil
+		return mcp.NewToolResultStructured(newDeleteAck(id), fmt.Sprintf("Issuer profile deleted: %s", id)), nil
 	}
 }
 

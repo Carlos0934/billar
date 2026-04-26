@@ -1,0 +1,62 @@
+# Archive Report: fix-unbilled-billable-filter
+
+**Change**: fix-unbilled-billable-filter
+**Archived**: 2026-04-25
+**Artifact Store**: engram
+**Verify Verdict**: PASS WITH WARNINGS (acceptable for automatic archive)
+
+---
+
+## Artifact Observation IDs (Traceability)
+
+| Artifact | Engram ID |
+|----------|-----------|
+| Proposal | #3643 |
+| Spec | #3647 |
+| Design | #3646 |
+| Tasks | #3648 |
+| Apply Progress | #3649 |
+| Verify Report | #3652 |
+
+---
+
+## Summary
+
+All 6 SDD phase artifacts retrieved and reviewed. 13/13 apply tasks tracked as complete across prior apply (3.1, 3.2, 4.1, 4.2, 5.1–5.4) and corrective pass (6.1, 6.2). No filesystem sync performed — engram mode, artifacts persist only in Engram.
+
+---
+
+## Specs Synced to Main
+
+Engram mode: no main-spec sync required. The delta spec modified `time-entry-core` and `invoice-generation` requirements; these remain in Engram and are reflected in the verified production code at:
+- `internal/infra/sqlite/time_entry_store.go` — SQL filters `billable = 1`
+- `internal/app/invoice_service.go` — defensive app-layer filter
+
+---
+
+## Archive Contents
+
+| Artifact | Status |
+|----------|--------|
+| proposal.md | ✅ Engram #3643 |
+| spec.md | ✅ Engram #3647 |
+| design.md | ✅ Engram #3646 |
+| tasks.md | ✅ Engram #3648 |
+| apply-progress | ✅ Engram #3649 |
+| verify-report | ✅ Engram #3652 |
+
+---
+
+## Warnings (Non-Blocking)
+
+1. **CLI/MCP connector proof**: Filtering inheritance only partially proven through delegation tests + service tests; no connector/e2e test exercises mixed or only-non-billable data through CLI/MCP output.
+2. **SQLite store coverage**: `time_entry_store.go` at 78.4% statement coverage, below the 80% strict-TDD threshold.
+3. **Corrective RED not reproducible**: The new only-non-billable test could not demonstrate RED because the prior apply's production fix was already in place.
+4. **Working tree pollution**: Unrelated pre-existing modified/untracked files remain outside this change.
+
+---
+
+## SDD Cycle Complete
+
+All phases executed: propose → spec → design → tasks → apply → verify → archive.
+Change ready for next SDD cycle.

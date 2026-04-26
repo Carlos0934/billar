@@ -25,6 +25,15 @@ type invoiceServiceStub struct {
 	getInvoiceErr   error
 	listInvoicesRes []app.InvoiceSummaryDTO
 	listInvoicesErr error
+	pdfArg          *app.RenderInvoicePDFCommand
+	pdfRes          app.RenderedFileDTO
+	pdfErr          error
+	addLineArg      *app.AddDraftLineCommand
+	addLineRes      app.InvoiceDTO
+	addLineErr      error
+	removeLineArg   *app.RemoveDraftLineCommand
+	removeLineRes   app.InvoiceDTO
+	removeLineErr   error
 }
 
 func (s *invoiceServiceStub) CreateDraftFromUnbilled(ctx context.Context, cmd app.CreateDraftFromUnbilledCommand) (app.InvoiceDTO, error) {
@@ -55,6 +64,101 @@ func (s *invoiceServiceStub) ListInvoices(ctx context.Context, customerID string
 	return s.listInvoicesRes, s.listInvoicesErr
 }
 
+func (s *invoiceServiceStub) RenderInvoicePDF(ctx context.Context, cmd app.RenderInvoicePDFCommand) (app.RenderedFileDTO, error) {
+	_ = ctx
+	s.pdfArg = &cmd
+	return s.pdfRes, s.pdfErr
+}
+
+func (s *invoiceServiceStub) AddDraftLine(ctx context.Context, cmd app.AddDraftLineCommand) (app.InvoiceDTO, error) {
+	_ = ctx
+	s.addLineArg = &cmd
+	return s.addLineRes, s.addLineErr
+}
+
+func (s *invoiceServiceStub) RemoveDraftLine(ctx context.Context, cmd app.RemoveDraftLineCommand) (app.InvoiceDTO, error) {
+	_ = ctx
+	s.removeLineArg = &cmd
+	return s.removeLineRes, s.removeLineErr
+}
+
+func TestInvoiceRenderPDFToolHandler(t *testing.T) {
+	t.Parallel()
+	svc := &invoiceServiceStub{pdfRes: app.RenderedFileDTO{InvoiceID: "inv_abc", Filename: "inv_abc.pdf", Path: "/tmp/exports/inv_abc.pdf", MimeType: "application/pdf", SizeBytes: 1234}}
+	_, handler := invoiceRenderPDFTool(svc, nil)
+	result, err := handler(context.Background(), mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "invoice.render_pdf", Arguments: map[string]any{"invoice_id": "inv_abc", "filename": "inv_abc.pdf"}}})
+	if err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("result = %+v, want success", result)
+	}
+	if svc.pdfArg == nil || svc.pdfArg.InvoiceID != "inv_abc" || svc.pdfArg.Filename != "inv_abc.pdf" {
+		t.Fatalf("pdf arg = %+v", svc.pdfArg)
+	}
+	if result.StructuredContent == nil {
+		t.Fatal("StructuredContent must not be nil")
+	}
+	raw, _ := json.Marshal(result.StructuredContent)
+	var dto app.RenderedFileDTO
+	if err := json.Unmarshal(raw, &dto); err != nil {
+		t.Fatalf("structured content decode: %v", err)
+	}
+	if dto.Path != "/tmp/exports/inv_abc.pdf" || dto.MimeType != "application/pdf" || dto.SizeBytes != 1234 {
+		t.Fatalf("dto = %+v", dto)
+	}
+}
+
+func TestInvoiceRenderPDFToolHandlerErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args map[string]any
+		svc  *invoiceServiceStub
+		want string
+	}{
+		{"missing invoice id", map[string]any{}, &invoiceServiceStub{}, "invoice_id"},
+		{"absolute path", map[string]any{"invoice_id": "inv_abc", "output_path": "/etc/passwd.pdf"}, &invoiceServiceStub{pdfErr: errors.New("output path must be relative to export root")}, "relative"},
+		{"traversal", map[string]any{"invoice_id": "inv_abc", "output_path": "../../etc/x.pdf"}, &invoiceServiceStub{pdfErr: errors.New("output path escapes export root")}, "escapes export root"},
+		{"filename separators", map[string]any{"invoice_id": "inv_abc", "filename": "a/b.pdf"}, &invoiceServiceStub{pdfErr: errors.New("filename must not contain path separators")}, "path separators"},
+		{"unset root", map[string]any{"invoice_id": "inv_abc"}, &invoiceServiceStub{pdfErr: errors.New("pdf export disabled: BILLAR_EXPORT_DIR not configured")}, "BILLAR_EXPORT_DIR"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, handler := invoiceRenderPDFTool(tc.svc, nil)
+			result, err := handler(context.Background(), mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "invoice.render_pdf", Arguments: tc.args}})
+			if err != nil {
+				t.Fatalf("handler error = %v", err)
+			}
+			if result == nil || !result.IsError {
+				t.Fatalf("result = %+v, want error", result)
+			}
+			if !strings.Contains(mcp.GetTextFromContent(result.Content[0]), tc.want) {
+				t.Fatalf("error = %q, want %q", mcp.GetTextFromContent(result.Content[0]), tc.want)
+			}
+		})
+	}
+}
+
+func TestInvoiceRenderPDFToolHandlerDefaultFilename(t *testing.T) {
+	t.Parallel()
+	svc := &invoiceServiceStub{pdfRes: app.RenderedFileDTO{InvoiceID: "inv_abc", Filename: "invoice-inv_abc.pdf", Path: "/tmp/exports/invoice-inv_abc.pdf", MimeType: "application/pdf", SizeBytes: 12}}
+	_, handler := invoiceRenderPDFTool(svc, nil)
+	result, err := handler(context.Background(), mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "invoice.render_pdf", Arguments: map[string]any{"invoice_id": "inv_abc"}}})
+	if err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("result = %+v, want success", result)
+	}
+	if svc.pdfArg == nil || svc.pdfArg.Filename != "" || svc.pdfArg.OutputPath != "" {
+		t.Fatalf("pdf arg = %+v, want service to synthesize default", svc.pdfArg)
+	}
+	if !strings.Contains(mcp.GetTextFromContent(result.Content[0]), "invoice-inv_abc.pdf") {
+		t.Fatalf("text = %q", mcp.GetTextFromContent(result.Content[0]))
+	}
+}
+
 // -- invoice.draft --
 
 func TestInvoiceDraftToolHandler(t *testing.T) {
@@ -71,9 +175,9 @@ func TestInvoiceDraftToolHandler(t *testing.T) {
 		{
 			name: "creates draft successfully",
 			service: &invoiceServiceStub{
-				draftRes: app.InvoiceDTO{ID: "inv_abc", CustomerID: "cus_1", Status: "draft", IsDraft: true},
+				draftRes: app.InvoiceDTO{ID: "inv_abc", CustomerID: "cus_1", Status: "draft", IsDraft: true, PeriodStart: "2026-04-01T00:00:00Z", PeriodEnd: "2026-04-30T00:00:00Z", DueDate: "2026-05-15T00:00:00Z", Notes: "Net 15"},
 			},
-			arguments:  map[string]any{"customer_profile_id": "cus_1"},
+			arguments:  map[string]any{"customer_profile_id": "cus_1", "period_start": "2026-04-01", "period_end": "2026-04-30", "due_date": "2026-05-15", "notes": "Net 15"},
 			wantResult: "inv_abc",
 		},
 		{
@@ -133,8 +237,68 @@ func TestInvoiceDraftToolHandler(t *testing.T) {
 			if tc.wantResult != "" && !strings.Contains(mcp.GetTextFromContent(result.Content[0]), tc.wantResult) {
 				t.Fatalf("handler result = %q, want contains %q", mcp.GetTextFromContent(result.Content[0]), tc.wantResult)
 			}
+			if tc.service != nil && tc.service.draftArg != nil && tc.service.draftArg.PeriodStart != "2026-04-01" {
+				t.Fatalf("draft arg = %+v, want metadata args", tc.service.draftArg)
+			}
 		})
 	}
+}
+
+func TestInvoiceLineToolHandlers(t *testing.T) {
+	t.Parallel()
+
+	updated := app.InvoiceDTO{ID: "inv_001", CustomerID: "cus_1", Status: "draft", Currency: "USD", IsDraft: true, Lines: []app.InvoiceLineDTO{{ID: "inl_manual", Description: "Setup fee", QuantityMin: 60, UnitRateAmount: 5000, UnitRateCurrency: "USD", LineTotalAmount: 5000, LineTotalCurrency: "USD"}}, Subtotal: 5000, GrandTotal: 5000}
+	t.Run("invoice.line_add returns canonical dto", func(t *testing.T) {
+		t.Parallel()
+		svc := &invoiceServiceStub{addLineRes: updated}
+		_, handler := invoiceLineAddTool(svc, nil)
+		result, err := handler(context.Background(), mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "invoice.line_add", Arguments: map[string]any{"invoice_id": "inv_001", "description": "Setup fee", "quantity_min": float64(60), "unit_rate_amount": float64(5000), "currency": "USD"}}})
+		if err != nil {
+			t.Fatalf("handler error = %v", err)
+		}
+		if result == nil || result.IsError || result.StructuredContent == nil {
+			t.Fatalf("result = %+v, want structured success", result)
+		}
+		if svc.addLineArg == nil || svc.addLineArg.InvoiceID != "inv_001" || svc.addLineArg.Description != "Setup fee" || svc.addLineArg.QuantityMin != 60 || svc.addLineArg.UnitRate != 5000 || svc.addLineArg.Currency != "USD" {
+			t.Fatalf("add arg = %+v", svc.addLineArg)
+		}
+		raw, _ := json.Marshal(result.StructuredContent)
+		var dto app.InvoiceDTO
+		if err := json.Unmarshal(raw, &dto); err != nil {
+			t.Fatalf("structured decode: %v", err)
+		}
+		if dto.GrandTotal != 5000 || len(dto.Lines) != 1 || dto.Lines[0].ID != "inl_manual" {
+			t.Fatalf("dto = %+v, want updated invoice", dto)
+		}
+	})
+	t.Run("invoice.line_remove returns canonical dto", func(t *testing.T) {
+		t.Parallel()
+		svc := &invoiceServiceStub{removeLineRes: updated}
+		_, handler := invoiceLineRemoveTool(svc, nil)
+		result, err := handler(context.Background(), mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "invoice.line_remove", Arguments: map[string]any{"invoice_id": "inv_001", "invoice_line_id": "inl_manual"}}})
+		if err != nil {
+			t.Fatalf("handler error = %v", err)
+		}
+		if result == nil || result.IsError || result.StructuredContent == nil {
+			t.Fatalf("result = %+v, want structured success", result)
+		}
+		if svc.removeLineArg == nil || svc.removeLineArg.InvoiceID != "inv_001" || svc.removeLineArg.InvoiceLineID != "inl_manual" {
+			t.Fatalf("remove arg = %+v", svc.removeLineArg)
+		}
+	})
+	t.Run("errors", func(t *testing.T) {
+		t.Parallel()
+		_, addHandler := invoiceLineAddTool(&invoiceServiceStub{addLineErr: errors.New("invoice is not draft")}, nil)
+		addResult, err := addHandler(context.Background(), mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "invoice.line_add", Arguments: map[string]any{"invoice_id": "inv_001", "description": "Setup", "quantity_min": float64(60), "unit_rate_amount": float64(5000), "currency": "USD"}}})
+		if err != nil || addResult == nil || !addResult.IsError || !strings.Contains(mcp.GetTextFromContent(addResult.Content[0]), "not draft") {
+			t.Fatalf("add error result = %+v err=%v", addResult, err)
+		}
+		_, removeHandler := invoiceLineRemoveTool(&invoiceServiceStub{removeLineErr: errors.New("cannot remove last line")}, nil)
+		removeResult, err := removeHandler(context.Background(), mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "invoice.line_remove", Arguments: map[string]any{"invoice_id": "inv_001", "invoice_line_id": "inl_last"}}})
+		if err != nil || removeResult == nil || !removeResult.IsError || !strings.Contains(mcp.GetTextFromContent(removeResult.Content[0]), "last line") {
+			t.Fatalf("remove error result = %+v err=%v", removeResult, err)
+		}
+	})
 }
 
 // -- invoice.issue --
@@ -301,7 +465,7 @@ func TestInvoiceGetToolHandler_StructuredDTO(t *testing.T) {
 	t.Parallel()
 
 	wantDTO := app.InvoiceDTO{
-		ID: "inv_abc", InvoiceNumber: "INV-001", CustomerID: "cus_1", Status: "issued", Currency: "USD",
+		ID: "inv_abc", InvoiceNumber: "INV-001", CustomerID: "cus_1", Status: "issued", Currency: "USD", PeriodStart: "2026-04-01T00:00:00Z", PeriodEnd: "2026-04-30T00:00:00Z", DueDate: "2026-05-15T00:00:00Z", Notes: "Net 15",
 		Lines: []app.InvoiceLineDTO{
 			{Description: "Consulting", QuantityMin: 90, UnitRateAmount: 10000, UnitRateCurrency: "USD", LineTotalAmount: 15000, LineTotalCurrency: "USD"},
 		},
@@ -345,6 +509,9 @@ func TestInvoiceGetToolHandler_StructuredDTO(t *testing.T) {
 	}
 	if gotDTO.GrandTotal != wantDTO.GrandTotal {
 		t.Errorf("StructuredContent.GrandTotal = %d, want %d", gotDTO.GrandTotal, wantDTO.GrandTotal)
+	}
+	if gotDTO.PeriodStart != wantDTO.PeriodStart || gotDTO.PeriodEnd != wantDTO.PeriodEnd || gotDTO.DueDate != wantDTO.DueDate || gotDTO.Notes != wantDTO.Notes {
+		t.Errorf("StructuredContent metadata = (%q,%q,%q,%q), want (%q,%q,%q,%q)", gotDTO.PeriodStart, gotDTO.PeriodEnd, gotDTO.DueDate, gotDTO.Notes, wantDTO.PeriodStart, wantDTO.PeriodEnd, wantDTO.DueDate, wantDTO.Notes)
 	}
 	if len(gotDTO.Lines) != 1 || gotDTO.Lines[0].Description != "Consulting" {
 		t.Errorf("StructuredContent.Lines = %+v, want one Consulting line", gotDTO.Lines)
@@ -445,7 +612,7 @@ func TestInvoiceListToolHandler_StructuredDTO(t *testing.T) {
 	t.Parallel()
 
 	summaries := []app.InvoiceSummaryDTO{
-		{ID: "inv_001", InvoiceNumber: "INV-001", CustomerID: "cus_1", Status: "issued", Currency: "USD", GrandTotal: 5000},
+		{ID: "inv_001", InvoiceNumber: "INV-001", CustomerID: "cus_1", Status: "issued", Currency: "USD", PeriodStart: "2026-04-01T00:00:00Z", PeriodEnd: "2026-04-30T00:00:00Z", DueDate: "2026-05-15T00:00:00Z", GrandTotal: 5000},
 		{ID: "inv_002", InvoiceNumber: "", CustomerID: "cus_1", Status: "draft", Currency: "USD", GrandTotal: 15000},
 	}
 	svc := &invoiceServiceStub{listInvoicesRes: summaries}
@@ -476,6 +643,9 @@ func TestInvoiceListToolHandler_StructuredDTO(t *testing.T) {
 	}
 	if gotSummaries[0].ID != "inv_001" || gotSummaries[0].GrandTotal != 5000 {
 		t.Errorf("StructuredContent[0] = %+v, want ID=inv_001 GrandTotal=5000", gotSummaries[0])
+	}
+	if gotSummaries[0].PeriodStart != "2026-04-01T00:00:00Z" || gotSummaries[0].PeriodEnd != "2026-04-30T00:00:00Z" || gotSummaries[0].DueDate != "2026-05-15T00:00:00Z" {
+		t.Errorf("StructuredContent[0] metadata = (%q,%q,%q), want persisted period and due date", gotSummaries[0].PeriodStart, gotSummaries[0].PeriodEnd, gotSummaries[0].DueDate)
 	}
 	if gotSummaries[1].ID != "inv_002" || gotSummaries[1].Status != "draft" {
 		t.Errorf("StructuredContent[1] = %+v, want ID=inv_002 Status=draft", gotSummaries[1])

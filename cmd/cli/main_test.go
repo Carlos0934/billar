@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -55,6 +56,28 @@ func TestMainRunsHealthCommand(t *testing.T) {
 	t.Cleanup(func() { os.Args = oldArgs })
 
 	main()
+}
+
+func TestOpenConfiguredStoreReportsDBPathAndOverrideHint(t *testing.T) {
+	parentFile := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(parentFile, []byte("file"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	dbPath := filepath.Join(parentFile, "billar.db")
+
+	store, err := openConfiguredStore(config.Config{DBPath: dbPath})
+	if err == nil {
+		if store != nil {
+			_ = store.Close()
+		}
+		t.Fatal("openConfiguredStore() error = nil, want directory creation error")
+	}
+	if !strings.Contains(err.Error(), dbPath) {
+		t.Fatalf("openConfiguredStore() error = %q, want attempted path %q", err.Error(), dbPath)
+	}
+	if !strings.Contains(err.Error(), "BILLAR_DB_PATH") {
+		t.Fatalf("openConfiguredStore() error = %q, want BILLAR_DB_PATH hint", err.Error())
+	}
 }
 
 func mustOpenCLIStore(t *testing.T) *infrasqlite.Store {

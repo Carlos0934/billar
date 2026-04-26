@@ -26,7 +26,7 @@ type Command struct {
 	colorEnabled bool
 }
 
-const commandUsage = "usage: billar <health|status|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>|agreement <create|get|list|update-rate|activate|deactivate>|time-entry <record|get|update|delete|list|list-unbilled>|invoice <draft|issue|discard>> [flags]"
+const commandUsage = "usage: billar <health|status|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>|agreement <create|get|list|update-rate|activate|deactivate>|time-entry <record|get|update|delete|list|list-unbilled>|invoice <draft|issue|discard|show|list|pdf|line>> [flags]"
 
 func NewCommand(health HealthStatusProvider, legalEntity LegalEntityServiceProvider, issuer IssuerProfileServiceProvider, customer CustomerProfileServiceProvider, agreement AgreementServiceProvider, timeEntry TimeEntryServiceProvider, invoice InvoiceServiceProvider, colorEnabled bool) Command {
 	return Command{

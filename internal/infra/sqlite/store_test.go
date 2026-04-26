@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -45,6 +46,29 @@ func TestOpenUsesTempDatabaseWhenPathIsBlank(t *testing.T) {
 
 	if err := assertLegalEntitiesTableExists(store.DB()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOpenCreatesParentDirectoryWithUserOnlyPermissions(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "data", "billar")
+	store, err := Open(filepath.Join(dir, "billar.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("Stat(%q) error = %v", dir, err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("created directory mode = %o, want 700", got)
 	}
 }
 
