@@ -38,13 +38,10 @@ func TestDoctorServiceReportHealthyEnvironment(t *testing.T) {
 	t.Parallel()
 
 	svc := NewDoctorService(doctorStoreStub{schemaVersion: 7}, DoctorConfig{
-		Project:              "billar",
-		DBPath:               "/runtime/billar.db",
-		ExportDir:            t.TempDir(),
-		PDFAvailable:         true,
-		MCPAPIKeysConfigured: true,
-		MCPListenAddr:        "127.0.0.1:8080",
-		MCPTrustedWrites:     true,
+		Project:      "billar",
+		DBPath:       "/runtime/billar.db",
+		ExportDir:    t.TempDir(),
+		PDFAvailable: true,
 	})
 
 	report, err := svc.Report(context.Background())
@@ -54,11 +51,8 @@ func TestDoctorServiceReportHealthyEnvironment(t *testing.T) {
 	if report.Project != "billar" || report.DBPath != "/runtime/billar.db" || report.SchemaVersion != 7 {
 		t.Fatalf("identity/schema = (%q,%q,%d), want configured runtime values", report.Project, report.DBPath, report.SchemaVersion)
 	}
-	if !report.DBReachable || !report.ExportDirSet || !report.ExportDirWritable || !report.PDFAvailable || !report.MCPConfigured {
+	if !report.DBReachable || !report.ExportDirSet || !report.ExportDirWritable || !report.PDFAvailable {
 		t.Fatalf("health booleans = %+v, want all configured checks true", report)
-	}
-	if report.MCPTrustedWrites {
-		t.Fatal("MCPTrustedWrites = true, want forced false for billing-write posture")
 	}
 	if len(report.CommandHealth) != 5 {
 		t.Fatalf("len(CommandHealth) = %d, want db/db_parent/export_dir/backup_dir/pdf entries", len(report.CommandHealth))
@@ -78,7 +72,7 @@ func TestDoctorServiceReportDegradedEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Report() error = %v", err)
 	}
-	if report.DBReachable || report.ExportDirSet || report.ExportDirWritable || report.PDFAvailable || report.MCPConfigured || report.MCPTrustedWrites {
+	if report.DBReachable || report.ExportDirSet || report.ExportDirWritable || report.PDFAvailable {
 		t.Fatalf("degraded booleans = %+v, want all optional/runtime checks false", report)
 	}
 	if report.SchemaVersion != 0 {
@@ -204,6 +198,7 @@ func TestDoctorReportDTOTags(t *testing.T) {
 		"Project":             "project",
 		"DBPath":              "db_path",
 		"DBPathSource":        "db_path_source",
+		"DBPathExists":        "db_path_exists",
 		"DBParentDir":         "db_parent_dir",
 		"DBParentDirSource":   "db_parent_dir_source",
 		"DBParentDirExists":   "db_parent_dir_exists",
@@ -220,13 +215,15 @@ func TestDoctorReportDTOTags(t *testing.T) {
 		"BackupDirExists":     "backup_dir_exists",
 		"BackupDirWritable":   "backup_dir_writable",
 		"PDFAvailable":        "pdf_available",
-		"MCPConfigured":       "mcp_configured",
-		"MCPTrustedWrites":    "mcp_trusted_writes",
-		"MCPListenAddr":       "mcp_listen_addr",
 		"CommandHealth":       "command_health",
 		"NextSteps":           "next_steps",
 	}
 	typ := reflect.TypeOf(DoctorReportDTO{})
+	for _, fieldName := range []string{"MCPConfigured", "MCPTrustedWrites", "MCPListenAddr"} {
+		if _, ok := typ.FieldByName(fieldName); ok {
+			t.Fatalf("DoctorReportDTO still exposes removed MCP field %s", fieldName)
+		}
+	}
 	for fieldName, tagName := range fields {
 		field, ok := typ.FieldByName(fieldName)
 		if !ok {

@@ -69,7 +69,7 @@ func TestSetupServiceRunReportsPathsNextStepsAndWarningsWithoutSecrets(t *testin
 		t.Fatalf("Warnings = %v, want sensitive-data warning", report.Warnings)
 	}
 	rendered := fmt.Sprintf("%+v", report)
-	for _, forbidden := range []string{"super-secret-token", "api_key", "MCP_API_KEYS", ".env"} {
+	for _, forbidden := range []string{"super-secret-token", "api_key", "bearer_token", ".env"} {
 		if strings.Contains(strings.ToLower(rendered), strings.ToLower(forbidden)) {
 			t.Fatalf("SetupReportDTO leaked forbidden token %q in %q", forbidden, rendered)
 		}

@@ -63,11 +63,6 @@ func writeDoctorText(out io.Writer, report app.DoctorReportDTO, colorEnabled boo
 	view.Field("backup_dir_exists", fmt.Sprintf("%t", report.BackupDirExists))
 	view.Field("backup_dir_writable", fmt.Sprintf("%t", report.BackupDirWritable))
 	view.Field("pdf_available", fmt.Sprintf("%t", report.PDFAvailable))
-	view.Field("mcp_configured", fmt.Sprintf("%t", report.MCPConfigured))
-	view.Field("mcp_trusted_writes", fmt.Sprintf("%t", report.MCPTrustedWrites))
-	if report.MCPListenAddr != "" {
-		view.Field("mcp_listen_addr", report.MCPListenAddr)
-	}
 	if !report.ExportDirSet {
 		view.Line("Guidance: set BILLAR_EXPORT_DIR or pass --out when exporting PDFs.")
 	}

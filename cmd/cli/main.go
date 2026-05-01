@@ -27,7 +27,7 @@ func newCommand(cfg config.Config, store *infrasqlite.Store) connectorcli.Comman
 	invoicePDFService := app.NewInvoicePDFService(invoiceStore, timeEntryStore, customerProfileStore, issuerProfileStore, legalEntityStore, pdf.Renderer{}, exportfs.FlexibleWriter{Root: cfg.ExportDir})
 	invoiceProvider := app.NewInvoiceProvider(invoiceService, invoicePDFService)
 	runtimePaths := runtimePathsFromConfig(cfg)
-	doctorService := app.NewDoctorService(invoiceStore, app.DoctorConfig{Project: cfg.AppName, DBPath: cfg.DBPath, DBPathSource: cfg.DBPathSource, ExportDir: cfg.ExportDir, ExportDirSource: cfg.ExportDirSource, BackupDir: cfg.BackupDir, BackupDirSource: cfg.BackupDirSource, PDFAvailable: true, MCPAPIKeysConfigured: strings.TrimSpace(os.Getenv("MCP_API_KEYS")) != "", MCPListenAddr: strings.TrimSpace(os.Getenv("MCP_HTTP_LISTEN_ADDR"))})
+	doctorService := app.NewDoctorService(invoiceStore, app.DoctorConfig{Project: cfg.AppName, DBPath: cfg.DBPath, DBPathSource: cfg.DBPathSource, ExportDir: cfg.ExportDir, ExportDirSource: cfg.ExportDirSource, BackupDir: cfg.BackupDir, BackupDirSource: cfg.BackupDirSource, PDFAvailable: true})
 	setupService := app.NewSetupService(cfg.AppName, runtimePaths)
 	backupService := app.NewBackupService(backupSnapshotterAdapter{inner: backup.Snapshotter{}}, backupListerAdapter{inner: backup.Lister{}}, staticRuntimePathsProvider{paths: runtimePaths})
 
@@ -46,7 +46,7 @@ func newCommand(cfg config.Config, store *infrasqlite.Store) connectorcli.Comman
 
 func newPreStoreCommand(cfg config.Config) connectorcli.Command {
 	runtimePaths := runtimePathsFromConfig(cfg)
-	doctorService := app.NewDoctorService(nil, app.DoctorConfig{Project: cfg.AppName, DBPath: cfg.DBPath, DBPathSource: cfg.DBPathSource, DBProbe: infrasqlite.DoctorReadOnlyProbe{}, ExportDir: cfg.ExportDir, ExportDirSource: cfg.ExportDirSource, BackupDir: cfg.BackupDir, BackupDirSource: cfg.BackupDirSource, PDFAvailable: true, MCPAPIKeysConfigured: strings.TrimSpace(os.Getenv("MCP_API_KEYS")) != "", MCPListenAddr: strings.TrimSpace(os.Getenv("MCP_HTTP_LISTEN_ADDR"))})
+	doctorService := app.NewDoctorService(nil, app.DoctorConfig{Project: cfg.AppName, DBPath: cfg.DBPath, DBPathSource: cfg.DBPathSource, DBProbe: infrasqlite.DoctorReadOnlyProbe{}, ExportDir: cfg.ExportDir, ExportDirSource: cfg.ExportDirSource, BackupDir: cfg.BackupDir, BackupDirSource: cfg.BackupDirSource, PDFAvailable: true})
 	setupService := app.NewSetupService(cfg.AppName, runtimePaths)
 	backupService := app.NewBackupService(backupSnapshotterAdapter{inner: backup.Snapshotter{}}, backupListerAdapter{inner: backup.Lister{}}, staticRuntimePathsProvider{paths: runtimePaths})
 	return connectorcli.NewCommand(app.NewHealthService(cfg.AppName), nil, nil, nil, nil, nil, nil, cfg.ColorEnabled, doctorService).WithSetupService(setupService).WithBackupService(backupService)

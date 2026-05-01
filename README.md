@@ -3,7 +3,6 @@
 Billar is a Go billing application with:
 
 - a CLI entrypoint in `cmd/cli`
-- an HTTP MCP server in `cmd/mcp-http`
 - SQLite-backed storage
 
 ## Prerequisites
@@ -16,8 +15,6 @@ Copy `.env.example` to `.env` for local runs, then adjust values as needed:
 
 ```env
 LOG_LEVEL=info
-MCP_API_KEYS=your-secret-api-key-here
-MCP_HTTP_LISTEN_ADDR=127.0.0.1:8080
 BILLAR_EXPORT_DIR=/tmp/billar-exports
 # BILLAR_DB_PATH=/absolute/path/to/billar.db
 # BILLAR_BACKUP_DIR=/absolute/path/to/billar-backups
@@ -57,7 +54,6 @@ make install
 make fmt
 make run-health
 make run-customer-list
-make run-mcp-http
 make run-invoice-import FILE=./path/to/invoice-import.json
 ```
 
@@ -71,14 +67,13 @@ go run ./cmd/cli backup create --format text
 go run ./cmd/cli backup list --format toon
 go run ./cmd/cli invoice import --file ./path/to/invoice-import.json --format toon
 go run ./cmd/cli invoice import --stdin < ./path/to/invoice-import.json
-go run ./cmd/mcp-http
 ```
 
 CLI commands support `--format text|json|toon` where the command exposes formatted output.
 
 ### CLI-first billing operations
 
-The CLI/app service path is the trusted surface for day-to-day billing work. Direct SQLite access is emergency repair-only and should require explicit operator approval; do not use ad-hoc SQL for normal invoice mutations. The MCP server remains available, but MCP billing writes are not trusted in the current operational posture.
+The CLI/app service path is the only supported surface for day-to-day billing work. Direct SQLite access is emergency repair-only and should require explicit operator approval; do not use ad-hoc SQL for normal invoice mutations.
 
 Useful billing commands:
 
@@ -119,38 +114,40 @@ billar backup list --format text
 
 Restore is intentionally deferred to future work and is not available/not implemented as a command in this slice. Until a safe restore lifecycle exists, the manual workaround is to stop Billar, copy the desired backup `.db` over the configured `BILLAR_DB_PATH`, then restart Billar.
 
-## MCP HTTP setup
+## Migration: MCP tools → CLI commands
 
-MCP is served over HTTP only.
+Billar is CLI-only. Use these command forms for workflows formerly exposed through the removed tool surface:
 
-- Endpoint: `http://127.0.0.1:8080/v1/mcp`
-- Health: `http://127.0.0.1:8080/healthz`
-- Auth: `Authorization: Bearer <api-key>`
-- Required config: `MCP_API_KEYS` (one or more comma-separated keys)
-- Listen address: `MCP_HTTP_LISTEN_ADDR` (defaults to `127.0.0.1:8080`)
-
-Example `opencode.json` snippet:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "billar": {
-      "type": "remote",
-      "url": "http://127.0.0.1:8080/v1/mcp",
-      "headers": {
-        "Authorization": "Bearer <your-api-key>"
-      }
-    }
-  }
-}
-```
-
-Generate a key with:
-
-```bash
-openssl rand -hex 32
-```
+| Former workflow | CLI command |
+|---|---|
+| `session.status` | Removed; CLI runs as the local operator. |
+| `health.check` | `billar health` |
+| `doctor.report` | `billar doctor [--format json\|toon]` |
+| `customer_profile.create` | `billar customer create` |
+| `customer_profile.list` | `billar customer list` |
+| `customer_profile.get` | `billar customer get --id <customer-profile-id>` |
+| `customer_profile.update` | `billar customer update --id <customer-profile-id>` |
+| `customer_profile.delete` | `billar customer delete --id <customer-profile-id>` |
+| `service_agreement.create` | `billar agreement create` |
+| `service_agreement.list_by_customer_profile` | `billar agreement list --customer <customer-profile-id>` |
+| `service_agreement.update_rate` | `billar agreement rate-update --id <agreement-id>` |
+| `service_agreement.activate` | `billar agreement activate --id <agreement-id>` |
+| `service_agreement.deactivate` | `billar agreement deactivate --id <agreement-id>` |
+| `time_entry.record` | `billar time add` |
+| `time_entry.list_by_customer_profile` | `billar time list --customer <customer-profile-id>` |
+| `time_entry.list_unbilled` | `billar time list-unbilled --customer <customer-profile-id>` |
+| `invoice.draft` | `billar invoice draft --customer-id <customer-profile-id>` |
+| `invoice.issue` | `billar invoice issue --id <invoice-id>` |
+| `invoice.discard` | `billar invoice discard --id <invoice-id>` |
+| `invoice.show` | `billar invoice show --id <invoice-id>` |
+| `invoice.inspect` | `billar invoice inspect --id <invoice-id>` |
+| `invoice.list` | `billar invoice list --customer-id <customer-profile-id> [--status <status>]` |
+| `invoice.line.add` | `billar invoice line add --invoice-id <invoice-id>` |
+| `invoice.line.remove` | `billar invoice line remove --invoice-id <invoice-id> --line-id <line-id>` |
+| `invoice.render_pdf` | `billar invoice pdf <invoice-id> --out <path>` |
+| `invoice.import` | `billar invoice import --file <path>` or `billar invoice import --stdin` |
+| `setup.*` | `billar setup` |
+| `backup.*` | `billar backup create` / `billar backup list` |
 
 ### Invoice PDF export
 
@@ -161,17 +158,13 @@ go run ./cmd/cli invoice pdf <invoice-id> --out ./exports/invoice.pdf --format j
 go run ./cmd/cli invoice pdf <invoice-id> --format text
 ```
 
-MCP exposes `invoice.render_pdf` with input `{ "invoice_id": "inv_123", "filename": "invoice.pdf" }` or `{ "invoice_id": "inv_123", "output_path": "nested/invoice.pdf" }`. MCP output paths must stay relative to `BILLAR_EXPORT_DIR`; absolute paths, traversal (`..`), and separators in `filename` are rejected.
-
 ## Architecture
 
 - `internal/core` — domain types
 - `internal/app` — services and DTOs
-- `internal/connectors` — CLI and MCP transport layer
+- `internal/connectors` — CLI transport layer
 - `internal/infra` — config, logging, SQLite, PDF rendering, export file writing
 
 ## Notes
 
-- `cmd/mcp-http` is the only MCP entrypoint.
-- Legacy OAuth/OIDC and stdio MCP flows have been removed.
-- `session.status` keeps an internal fixed identity for compatibility, but hides synthetic identity fields from text output.
+- The CLI is the sole supported operational interface.

@@ -28,17 +28,14 @@ func NewDoctorService(store DoctorStore, config DoctorConfig) DoctorService {
 
 func (s DoctorService) Report(ctx context.Context) (DoctorReportDTO, error) {
 	report := DoctorReportDTO{
-		Project:          strings.TrimSpace(s.config.Project),
-		DBPath:           strings.TrimSpace(s.config.DBPath),
-		DBPathSource:     doctorPathSource(s.config.DBPathSource),
-		ExportDir:        strings.TrimSpace(s.config.ExportDir),
-		ExportDirSource:  doctorPathSource(s.config.ExportDirSource),
-		BackupDir:        strings.TrimSpace(s.config.BackupDir),
-		BackupDirSource:  doctorPathSource(s.config.BackupDirSource),
-		PDFAvailable:     s.config.PDFAvailable,
-		MCPConfigured:    s.config.MCPAPIKeysConfigured,
-		MCPTrustedWrites: false,
-		MCPListenAddr:    strings.TrimSpace(s.config.MCPListenAddr),
+		Project:         strings.TrimSpace(s.config.Project),
+		DBPath:          strings.TrimSpace(s.config.DBPath),
+		DBPathSource:    doctorPathSource(s.config.DBPathSource),
+		ExportDir:       strings.TrimSpace(s.config.ExportDir),
+		ExportDirSource: doctorPathSource(s.config.ExportDirSource),
+		BackupDir:       strings.TrimSpace(s.config.BackupDir),
+		BackupDirSource: doctorPathSource(s.config.BackupDirSource),
+		PDFAvailable:    s.config.PDFAvailable,
 	}
 	report.DBParentDir = filepath.Dir(report.DBPath)
 	report.DBParentDirSource = report.DBPathSource

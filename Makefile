@@ -3,7 +3,7 @@ ifeq ($(strip $(BINDIR)),)
 BINDIR := $(shell go env GOPATH)/bin
 endif
 
-.PHONY: test build install uninstall run-health run-customer-list run-mcp-http run-invoice-import fmt
+.PHONY: test build install uninstall run-health run-customer-list run-invoice-import fmt
 
 test:
 	go test ./...
@@ -23,9 +23,6 @@ run-health:
 
 run-customer-list:
 	go run ./cmd/cli customer list
-
-run-mcp-http:
-	go run ./cmd/mcp-http
 
 run-invoice-import:
 	go run ./cmd/cli invoice import --file $(FILE)

@@ -11,8 +11,6 @@ This system is a Go application for managing:
 * invoice generation
 * invoice PDF rendering
 * CLI execution
-* MCP tool execution
-* request-authenticated protected access
 
 This baseline stays intentionally pragmatic.
 
@@ -27,7 +25,7 @@ It does **not** include:
 * workflow engine
 * distributed services
 
-The main objective is to support a reliable hourly billing flow with a clean internal model, simple delivery mechanisms, and direct compatibility with CLI and MCP connectors.
+The main objective is to support a reliable hourly billing flow with a clean internal model, simple delivery mechanics, and direct compatibility with the CLI connector.
 
 ---
 
@@ -38,7 +36,7 @@ The main objective is to support a reliable hourly billing flow with a clean int
 * Pragmatic modular monolith
 * Simple layered architecture
 * Clear internal boundaries
-* Connector-friendly design for CLI and MCP
+* Connector-friendly design for CLI
 
 ### What this means
 
@@ -46,7 +44,7 @@ The main objective is to support a reliable hourly billing flow with a clean int
 * We avoid forcing heavy DDD structure everywhere.
 * We use small business models and services where they help.
 * We expose operations through application commands/services.
-* We keep persistence, PDF rendering, auth, CLI, and MCP outside the core logic.
+* We keep persistence, PDF rendering, and CLI translation outside the core logic.
 
 ### What we are explicitly avoiding
 
@@ -70,9 +68,7 @@ The main objective is to support a reliable hourly billing flow with a clean int
 ### Access model
 
 * Single local operator
-* API key authentication for MCP HTTP (Bearer token, validated in middleware)
-* MCP HTTP protected operations require bearer-authenticated request identity
-* CLI uses a local identity constructed at startup; no allowlist enforcement
+* CLI-only local operation; no network access surface in this baseline
 
 ### Billing model
 
@@ -81,7 +77,6 @@ The main objective is to support a reliable hourly billing flow with a clean int
 * One service agreement has one hourly rate at a time
 * Invoice quantity is total billable hours
 * Normal billing operations are CLI/app-service first; direct SQLite edits are emergency repair-only and require explicit operator approval
-* MCP remains available, but MCP billing writes are not a trusted write surface in this posture
 
 ### Currency
 
@@ -115,9 +110,9 @@ The main objective is to support a reliable hourly billing flow with a clean int
 
 1. Keep business rules in plain Go types and services.
 2. Keep the architecture easy to navigate.
-3. CLI and MCP should call the same application services.
+3. CLI commands should call application services.
 4. Persistence should not leak into billing logic.
-5. Authentication should not leak into billing logic.
+5. Access concerns should not leak into billing logic.
 6. PDF rendering should not own invoice calculations.
 7. Issued invoices must remain reproducible.
 8. Prefer boring code over theoretical purity.
@@ -160,8 +155,6 @@ Includes:
 * create invoice draft
 * issue invoice
 * render invoice pdf
-* inspect current authenticated identity state
-* validate authenticated access
 
 ## 5.3 Connectors
 
@@ -170,8 +163,6 @@ Contains entrypoints.
 Includes:
 
 * CLI commands
-* MCP tools
-* auth callback handlers if needed
 
 These adapters translate input/output and call application services.
 
@@ -183,7 +174,6 @@ Includes:
 
 * SQLite access
 * repositories/store layer
-* API key auth (MCP HTTP)
 * PDF renderer
 * config loading
 
@@ -366,27 +356,6 @@ Represents the operator/company issuing invoices.
 
 * belongs to exactly one legal entity
 * one legal entity can have at most one issuer profile
-
----
-
-## 6.7 Session
-
-Represents current access state.
-
-### Fields
-
-* `ID`
-* `UserEmail`
-* `Unlogouted`
-* `UnlogoutedAt`
-* `LastActivityAt`
-* `LockedAt`
-
-### Rules
-
-* no protected operation before authenticated identity is present
-* MCP HTTP requires valid bearer-authenticated API key identity on each request
-* CLI constructs a local identity at startup; protected operations receive it automatically
 
 ---
 
@@ -582,10 +551,6 @@ type DoctorService interface {
     Report(ctx context.Context) (DoctorReportDTO, error)
 }
 
-type SessionService interface {
-    Status(ctx context.Context) (SessionDTO, error)
-    ValidateAccess(ctx context.Context) (bool, error)
-}
 ```
 
 ---
@@ -602,7 +567,6 @@ type Store interface {
     Agreements() ServiceAgreementStore
     TimeEntries() TimeEntryStore
     Invoices() InvoiceStore
-    Session() SessionStore
     InTx(ctx context.Context, fn func(ctx context.Context, store Store) error) error
 }
 
@@ -643,19 +607,6 @@ type InvoiceStore interface {
 type IssuerProfileStore interface {
     Save(ctx context.Context, profile *IssuerProfile) error
     GetByID(ctx context.Context, id string) (*IssuerProfile, error)
-}
-
-type SessionStore interface {
-    Save(ctx context.Context, session *Session) error
-    GetCurrent(ctx context.Context) (*Session, error)
-}
-
-type IdentityVerifier interface {
-    VerifyIDToken(ctx context.Context, rawToken string) (AuthenticatedIdentity, error)
-}
-
-type AccessPolicy interface {
-    IsAllowed(email string) bool
 }
 
 type PDFRenderer interface {
@@ -731,23 +682,6 @@ type CreateDraftInvoiceFromUnbilledTimeCommand struct {
 ```
 
 ```go
-type HandleOAuthCallbackCommand struct {
-    Code  string
-    State string
-}
-```
-
-```go
-type AuthenticatedIdentity struct {
-    Email          string
-    EmailVerified  bool
-    Subject        string
-    Issuer         string
-}
-```
-
----
-
 ## 12. CLI Surface
 
 ```text
@@ -804,52 +738,35 @@ Global setup and backup use shared application services. Runtime path resolution
 
 ---
 
-## 13. MCP Tool Surface
+## 13. Migration: MCP tools → CLI commands
 
-* `session.status`
-* `issuer_profile.create`
-* `issuer_profile.get`
-* `issuer_profile.update` — accepts inline legal entity fields (`type`, `legal_name`, `trade_name`, `tax_id`, `email`, `phone`, `website`, `billing_address`); cascades to the linked legal entity
-* `customer_profile.create`
-* `customer_profile.get`
-* `customer_profile.list`
-* `customer_profile.update` — accepts inline legal entity fields (`type`, `legal_name`, `trade_name`, `tax_id`, `email`, `phone`, `website`, `billing_address`); cascades to the linked legal entity
-* `customer_profile.delete`
-* `agreement.create`
-* `agreement.list_by_customer_profile`
-* `agreement.update_rate`
-* `time_entry.create`
-* `time_entry.list_by_customer_profile`
-* `time_entry.list_unbilled`
-* `invoice.draft` — accepts optional `period_start`, `period_end`, `due_date`, and `notes`; omitted period dates default from selected unbilled entries
-* `invoice.issue`
-* `invoice.discard`
-* `invoice.get` — implemented (returns full `InvoiceDTO` with hydrated lines)
-* `invoice.list` — implemented (returns `[]InvoiceSummaryDTO`, supports optional `status` filter)
-* `invoice.render_pdf` — available for file outputs rooted under `BILLAR_EXPORT_DIR`
-
-**Deferred (future slices — not in current MCP surface)**:
-
-* ~~`invoice.create_draft_from_unbilled`~~ — replaced by `invoice.draft` in current slice
-* trusted MCP invoice metadata writes — deferred; use CLI/app path for billing writes
-
-**Removed tools** (legal entity is always accessed via its owning profile, never directly):
-
-* ~~`legal_entity.create`~~ — use `customer_profile.create` or `issuer_profile.create`
-* ~~`legal_entity.get`~~ — profile responses include `legal_entity_id`; full legal entity fields are updated via `customer_profile.update` or `issuer_profile.update`
-* ~~`legal_entity.list`~~ — list via profile tools
-* ~~`legal_entity.update`~~ — use `customer_profile.update` or `issuer_profile.update`
-* ~~`legal_entity.delete`~~ — legal entities are lifecycle-managed by their profiles
+| Former MCP tool | CLI command |
+|---|---|
+| `session.status` | Removed; CLI runs as the local operator. |
+| `health.check` | `billar health` |
+| `doctor.report` | `billar doctor [--format json\|toon]` |
+| `customer_profile.create` | `billar customer create` |
+| `customer_profile.list` | `billar customer list` |
+| `customer_profile.get` | `billar customer get --id <customer-profile-id>` |
+| `customer_profile.update` | `billar customer update --id <customer-profile-id>` |
+| `customer_profile.delete` | `billar customer delete --id <customer-profile-id>` |
+| `service_agreement.*` | `billar agreement *` |
+| `time_entry.*` | `billar time *` |
+| `invoice.draft` | `billar invoice draft --customer-id <customer-profile-id>` |
+| `invoice.issue` | `billar invoice issue --id <invoice-id>` |
+| `invoice.discard` | `billar invoice discard --id <invoice-id>` |
+| `invoice.show` | `billar invoice show --id <invoice-id>` |
+| `invoice.inspect` | `billar invoice inspect --id <invoice-id>` |
+| `invoice.list` | `billar invoice list --customer-id <customer-profile-id> [--status <status>]` |
+| `invoice.line.add` | `billar invoice line add --invoice-id <invoice-id>` |
+| `invoice.line.remove` | `billar invoice line remove --invoice-id <invoice-id> --line-id <line-id>` |
+| `invoice.render_pdf` | `billar invoice pdf <invoice-id> --out <path>` |
+| `invoice.import` | `billar invoice import --file <path>` or `billar invoice import --stdin` |
+| `setup.*` / `backup.*` | `billar setup` / `billar backup create` / `billar backup list` |
 
 ### Rule
 
-MCP and CLI both call application services.
-Neither should depend directly on SQLite or PDF libraries.
-Normal billing writes should be performed through CLI/application services; SQLite is reserved for explicit emergency repair and MCP writes are not trusted for billing mutations in this change.
-The HTTP MCP transport is exposed from the auth HTTP server at `/v1/mcp`.
-Authentication for MCP-capable clients is owned by the Bearer API key middleware.
-The current MCP session surface keeps only `session.status` for session inspection.
-Early MCP bootstrap may include deterministic connector-level tools such as `hello_world` while the application surface is still growing.
+CLI commands call application services and do not depend directly on SQLite or PDF libraries. Normal billing writes should be performed through CLI/application services; SQLite is reserved for explicit emergency repair.
 
 ---
 
@@ -864,7 +781,6 @@ Tables:
 * `time_entries`
 * `invoices`
 * `invoice_lines`
-* `sessions`
 * `invoice_sequences`
 
 Rule:
@@ -879,7 +795,6 @@ Rule:
 ```text
 cmd/
   cli/
-  mcp/
 
 internal/
   core/
@@ -889,7 +804,6 @@ internal/
     time_entry.go
     invoice.go
     issuer_profile.go
-    session.go
     money.go
     hours.go
     types.go
@@ -902,22 +816,15 @@ internal/
     time_entry_service.go
     invoice_service.go
     issuer_profile_service.go
-    session_service.go
     legal_entity_dto.go
     customer_profile_dto.go
     issuer_profile_dto.go
 
   connectors/
     cli/
-    mcp/
-    mcphttp/
-
-cmd/
-  mcp-http/
 
   infra/
     sqlite/
-    auth/
     pdf/
     config/
 ```
@@ -929,16 +836,6 @@ This structure is flatter, easier to read, and still keeps the right separation.
 ## 16. Suggested Libraries
 
 These are candidate libraries, not hard requirements.
-
-### HTTP / routing
-
-* `net/http`
-* `github.com/go-chi/chi/v5`
-
-### OAuth / OIDC (removed from MCP HTTP path)
-
-* ~~`github.com/coreos/go-oidc`~~ — no longer used for MCP HTTP auth
-* ~~`golang.org/x/oauth2`~~ — no longer used for MCP HTTP auth
 
 ### SQLite
 
@@ -966,9 +863,7 @@ Fallback if direct drawing is needed:
 
 ### Notes
 
-* there is no need for a heavy auth framework
 * there is no need for a heavy DDD framework
-* MCP compatibility comes from exposing the right HTTP/tool surface, not from a special billing library
 
 ---
 
@@ -976,17 +871,15 @@ Fallback if direct drawing is needed:
 
 Build the first end-to-end billing loop:
 
-1. authenticate via Bearer API key (MCP HTTP) or use local CLI identity
-2. establish authenticated access context
-3. create legal entity for the issuer
-4. configure issuer profile
-5. create legal entity for the customer
-6. create customer profile
-7. create service agreement
-8. record time entry
-9. create draft invoice from unbilled time
-10. issue invoice
-11. render invoice PDF
+1. create legal entity for the issuer
+2. configure issuer profile
+3. create legal entity for the customer
+4. create customer profile
+5. create service agreement
+6. record time entry
+7. create draft invoice from unbilled time
+8. issue invoice
+9. render invoice PDF
 
 That is the correct first slice.
 
@@ -1005,20 +898,16 @@ Do not add yet:
 * SaaS multi-tenancy
 * messaging/webhooks
 * complex reporting
-* custom authorization server
+* custom network authorization server
 
 ---
 
 ## 19. Remaining Decisions To Freeze
 
 1. ~~invoice number format~~ → **Frozen**: `INV-YYYY-NNNN`, global yearly sequence persisted in `invoice_sequences` table, assigned only at issue time.
-2. session timeout policy or manual logout-only
-3. final PDF rendering library
-4. invoice grouping policy for time entries
-5. whether time entry editing is allowed after draft creation but before issue
-6. ~~exact OAuth provider choice~~ → **Resolved**: MCP HTTP uses Bearer API key auth; CLI uses a local identity at startup.
-
-Development default for the first runnable auth surface: Bearer API key for MCP HTTP; local identity for CLI.
+2. final PDF rendering library
+3. invoice grouping policy for time entries
+4. whether time entry editing is allowed after draft creation but before issue
 
 ---
 
@@ -1035,13 +924,6 @@ Development default for the first runnable auth surface: Bearer API key for MCP 
 * internal money precision: 4 digits
 * internal hours precision: 4 digits
 * invoice display preserves 4-digit formatting where needed
-
-### Access
-
-* API key authentication for MCP HTTP (Bearer token)
-* MCP clients authenticate via Bearer API key; Billar middleware validates and injects identity
-* CLI uses a local identity at startup
-* single operator scope for now
 
 ### Invoice generation
 
@@ -1067,14 +949,12 @@ The minimum stable internal model is:
 * `Invoice`
 * `InvoiceLine`
 * `IssuerProfile`
-* `Session`
 * shared types: `Money`, `Hours`, `CurrencyCode`, `InvoiceNumber`, `Address`
 
 The minimum viable stack is:
 
 * Go
 * SQLite
-* Chi or net/http
 * HTML-to-PDF renderer
 
 This is enough to build the first serious version without forcing full DDD ceremony or premature infrastructure complexity.

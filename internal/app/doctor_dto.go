@@ -21,9 +21,6 @@ type DoctorReportDTO struct {
 	BackupDirExists     bool                     `json:"backup_dir_exists" toon:"backup_dir_exists"`
 	BackupDirWritable   bool                     `json:"backup_dir_writable" toon:"backup_dir_writable"`
 	PDFAvailable        bool                     `json:"pdf_available" toon:"pdf_available"`
-	MCPConfigured       bool                     `json:"mcp_configured" toon:"mcp_configured"`
-	MCPTrustedWrites    bool                     `json:"mcp_trusted_writes" toon:"mcp_trusted_writes"`
-	MCPListenAddr       string                   `json:"mcp_listen_addr" toon:"mcp_listen_addr"`
 	CommandHealth       []DoctorCommandHealthDTO `json:"command_health" toon:"command_health"`
 	NextSteps           []string                 `json:"next_steps" toon:"next_steps"`
 }
@@ -35,16 +32,13 @@ type DoctorCommandHealthDTO struct {
 }
 
 type DoctorConfig struct {
-	Project              string
-	DBPath               string
-	DBPathSource         string
-	DBProbe              DoctorDBProbe
-	ExportDir            string
-	ExportDirSource      string
-	BackupDir            string
-	BackupDirSource      string
-	PDFAvailable         bool
-	MCPAPIKeysConfigured bool
-	MCPListenAddr        string
-	MCPTrustedWrites     bool
+	Project         string
+	DBPath          string
+	DBPathSource    string
+	DBProbe         DoctorDBProbe
+	ExportDir       string
+	ExportDirSource string
+	BackupDir       string
+	BackupDirSource string
+	PDFAvailable    bool
 }

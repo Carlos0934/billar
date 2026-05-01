@@ -13,7 +13,7 @@ license: Apache-2.0
 - Use this skill for Go code shape and testing; use `architecture-billar` for layer ownership and boundary decisions.
 - Writing or reviewing Go code in Billar
 - Adding `internal/core`, `internal/app`, `internal/connectors`, or `internal/infra` code
-- Scaffolding the first service slice, including health or session-related seams
+- Scaffolding service slices, including health and billing seams
 
 ## Critical Patterns
 
@@ -24,7 +24,6 @@ license: Apache-2.0
 ```text
 cmd/
   cli/
-  mcp/
 
 internal/
   core/
@@ -35,16 +34,16 @@ internal/
 
 - Keep core types and rules in `internal/core`.
 - Put application services, commands, and DTOs in `internal/app`.
-- Put CLI, MCP, and auth callback entrypoints in `internal/connectors`.
-- Put SQLite, auth, PDF, and config implementations in `internal/infra`.
+- Put CLI entrypoints in `internal/connectors`.
+- Put SQLite, PDF, and config implementations in `internal/infra`.
 
 ### Service seams
 
 - Keep business rules in plain Go structs and functions.
 - Application services coordinate use cases; they do not become mini-frameworks.
 - Define small interfaces in the consuming package when a seam is needed.
-- CLI and MCP should call the same application services.
-- Do not let SQLite, OAuth, session storage, or rendering details leak into core logic.
+- CLI should call application services.
+- Do not let SQLite or rendering details leak into core logic.
 
 ### Testing and TDD
 
@@ -68,20 +67,20 @@ internal/
 ```go
 package app
 
-type SessionReader interface {
-    GetCurrent(ctx context.Context) (*core.Session, error)
+type InvoiceReader interface {
+    GetByID(ctx context.Context, id string) (core.Invoice, error)
 }
 
-type SessionService struct {
-    sessions SessionReader
+type InvoiceInspector struct {
+    invoices InvoiceReader
 }
 
-func (s SessionService) GetStatus(ctx context.Context) (*core.Session, error) {
-    session, err := s.sessions.GetCurrent(ctx)
+func (s InvoiceInspector) Inspect(ctx context.Context, id string) (core.Invoice, error) {
+    invoice, err := s.invoices.GetByID(ctx, id)
     if err != nil {
-        return nil, fmt.Errorf("get session status: %w", err)
+        return core.Invoice{}, fmt.Errorf("inspect invoice: %w", err)
     }
-    return session, nil
+    return invoice, nil
 }
 ```
 
