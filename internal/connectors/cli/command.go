@@ -26,6 +26,7 @@ type SetupServiceProvider interface {
 type BackupServiceProvider interface {
 	Create(ctx context.Context) (app.BackupRecordDTO, error)
 	List(ctx context.Context) (app.BackupListDTO, error)
+	Restore(ctx context.Context, req app.BackupRestoreRequest) (app.BackupRestoreResultDTO, error)
 }
 
 type Command struct {
@@ -44,7 +45,7 @@ type Command struct {
 	stdin        io.Reader
 }
 
-const commandUsage = "usage: billar <health|status|doctor|setup|backup <create|list>|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>|agreement <create|get|list|update-rate|activate|deactivate>|time-entry <record|get|update|delete|list|list-unbilled>|invoice <draft|issue|discard|show|list|inspect|update-metadata|pdf|line>> [flags]"
+const commandUsage = "usage: billar <health|status|doctor|setup|backup <create|list|restore>|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>|agreement <create|get|list|update-rate|activate|deactivate>|time-entry <record|get|update|delete|list|list-unbilled>|invoice <draft|issue|discard|show|list|inspect|update-metadata|pdf|line>> [flags]"
 
 func NewCommand(health HealthStatusProvider, legalEntity LegalEntityServiceProvider, issuer IssuerProfileServiceProvider, customer CustomerProfileServiceProvider, agreement AgreementServiceProvider, timeEntry TimeEntryServiceProvider, invoice InvoiceServiceProvider, colorEnabled bool, optional ...DoctorStatusProvider) Command {
 	var doctor DoctorStatusProvider

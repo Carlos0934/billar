@@ -6,12 +6,45 @@ import (
 	"errors"
 	"io/fs"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	_ "modernc.org/sqlite"
 )
+
+func TestLatestMigrationVersionReturnsMaxEmbeddedMigration(t *testing.T) {
+	t.Parallel()
+
+	got, err := LatestMigrationVersion()
+	if err != nil {
+		t.Fatalf("LatestMigrationVersion() error = %v", err)
+	}
+	if got != 4 {
+		t.Fatalf("LatestMigrationVersion() = %d, want max embedded migration 4", got)
+	}
+}
+
+func TestRequiredBillarTablesExportsBaselineTableNames(t *testing.T) {
+	t.Parallel()
+
+	got := append([]string(nil), RequiredBillarTables...)
+	sort.Strings(got)
+	want := []string{
+		"customer_profiles",
+		"invoice_lines",
+		"invoice_sequences",
+		"invoices",
+		"issuer_profiles",
+		"legal_entities",
+		"service_agreements",
+		"time_entries",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("RequiredBillarTables = %v, want %v", RequiredBillarTables, want)
+	}
+}
 
 func newTempDB(t *testing.T) (*sql.DB, func()) {
 	t.Helper()

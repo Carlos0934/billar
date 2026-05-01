@@ -13,6 +13,40 @@ import (
 
 type Lister struct{}
 
+func LookupByID(dir, id string) (Record, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Record{}, fmt.Errorf("backup %s not found", id)
+		}
+		return Record{}, fmt.Errorf("read backup directory %q: %w", dir, err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".db") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		_, fileID := parseRecordName(path)
+		if fileID != id {
+			continue
+		}
+		record, err := readRecord(path)
+		if err != nil {
+			return Record{}, err
+		}
+		if !record.Metadata {
+			return Record{}, fmt.Errorf("sidecar_missing: backup %s is missing metadata sidecar %q", id, path+".json")
+		}
+		if record.ID != fileID {
+			return Record{}, fmt.Errorf("id_basename_mismatch: sidecar id %q does not match file basename %q", record.ID, fileID)
+		}
+		return record, nil
+	}
+
+	return Record{}, fmt.Errorf("backup %s not found", id)
+}
+
 func (Lister) List(ctx context.Context, dir string) ([]Record, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

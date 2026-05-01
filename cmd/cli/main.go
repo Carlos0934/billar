@@ -29,7 +29,7 @@ func newCommand(cfg config.Config, store *infrasqlite.Store) connectorcli.Comman
 	runtimePaths := runtimePathsFromConfig(cfg)
 	doctorService := app.NewDoctorService(invoiceStore, app.DoctorConfig{Project: cfg.AppName, DBPath: cfg.DBPath, DBPathSource: cfg.DBPathSource, ExportDir: cfg.ExportDir, ExportDirSource: cfg.ExportDirSource, BackupDir: cfg.BackupDir, BackupDirSource: cfg.BackupDirSource, PDFAvailable: true})
 	setupService := app.NewSetupService(cfg.AppName, runtimePaths)
-	backupService := app.NewBackupService(backupSnapshotterAdapter{inner: backup.Snapshotter{}}, backupListerAdapter{inner: backup.Lister{}}, staticRuntimePathsProvider{paths: runtimePaths})
+	backupService := newBackupService(runtimePaths)
 
 	return connectorcli.NewCommand(
 		app.NewHealthService(cfg.AppName),
@@ -48,8 +48,18 @@ func newPreStoreCommand(cfg config.Config) connectorcli.Command {
 	runtimePaths := runtimePathsFromConfig(cfg)
 	doctorService := app.NewDoctorService(nil, app.DoctorConfig{Project: cfg.AppName, DBPath: cfg.DBPath, DBPathSource: cfg.DBPathSource, DBProbe: infrasqlite.DoctorReadOnlyProbe{}, ExportDir: cfg.ExportDir, ExportDirSource: cfg.ExportDirSource, BackupDir: cfg.BackupDir, BackupDirSource: cfg.BackupDirSource, PDFAvailable: true})
 	setupService := app.NewSetupService(cfg.AppName, runtimePaths)
-	backupService := app.NewBackupService(backupSnapshotterAdapter{inner: backup.Snapshotter{}}, backupListerAdapter{inner: backup.Lister{}}, staticRuntimePathsProvider{paths: runtimePaths})
+	backupService := newBackupService(runtimePaths)
 	return connectorcli.NewCommand(app.NewHealthService(cfg.AppName), nil, nil, nil, nil, nil, nil, cfg.ColorEnabled, doctorService).WithSetupService(setupService).WithBackupService(backupService)
+}
+
+func newBackupService(runtimePaths app.RuntimePaths) app.BackupService {
+	return app.NewBackupServiceWithRestore(
+		backupSnapshotterAdapter{inner: backup.Snapshotter{}},
+		backupListerAdapter{inner: backup.Lister{}},
+		staticRuntimePathsProvider{paths: runtimePaths},
+		backupRestorerAdapter{inner: backup.Restorer{}},
+		latestMigrationSchemaProvider{},
+	)
 }
 
 func runtimePathsFromConfig(cfg config.Config) app.RuntimePaths {
@@ -110,6 +120,61 @@ func backupRecordToApp(record backup.Record) app.BackupRecord {
 	}
 }
 
+type backupRestorerAdapter struct {
+	inner backup.Restorer
+}
+
+func (a backupRestorerAdapter) Resolve(ctx context.Context, req app.BackupRestoreRequest, backupDir string) (app.BackupRecord, error) {
+	record, err := a.inner.Resolve(ctx, backup.RestoreRequest{BackupID: req.BackupID, File: req.File}, backupDir)
+	if err != nil {
+		return app.BackupRecord{}, err
+	}
+	return backupRecordToApp(record), nil
+}
+
+func (a backupRestorerAdapter) Validate(ctx context.Context, record app.BackupRecord, targetDBPath string, binarySchema int) (app.BackupValidation, error) {
+	validation, err := a.inner.Validate(ctx, appRecordToBackup(record), targetDBPath, binarySchema)
+	return app.BackupValidation{
+		OK:           validation.OK,
+		SidecarOK:    validation.SidecarOK,
+		HashOK:       validation.HashOK,
+		SizeOK:       validation.SizeOK,
+		IntegrityOK:  validation.IntegrityOK,
+		TablesOK:     validation.TablesOK,
+		SchemaOK:     validation.SchemaOK,
+		BackupSchema: validation.BackupSchema,
+		BinarySchema: validation.BinarySchema,
+	}, err
+}
+
+func (a backupRestorerAdapter) Replace(ctx context.Context, record app.BackupRecord, targetDBPath string) error {
+	return a.inner.Replace(ctx, appRecordToBackup(record), targetDBPath)
+}
+
+func appRecordToBackup(record app.BackupRecord) backup.Record {
+	return backup.Record{
+		ID:            record.ID,
+		File:          record.File,
+		SidecarFile:   record.SidecarFile,
+		CreatedAt:     record.CreatedAt,
+		SchemaVersion: record.SchemaVersion,
+		SizeBytes:     record.SizeBytes,
+		SHA256:        record.SHA256,
+		SourceDBPath:  record.SourceDBPath,
+		Metadata:      record.Metadata,
+	}
+}
+
+type latestMigrationSchemaProvider struct{}
+
+func (latestMigrationSchemaProvider) LatestSchemaVersion() int {
+	version, err := infrasqlite.LatestMigrationVersion()
+	if err != nil {
+		return 0
+	}
+	return version
+}
+
 func main() {
 	ctx := context.Background()
 	cfg, err := config.Load()
@@ -121,7 +186,7 @@ func main() {
 		cmd := newPreStoreCommand(cfg)
 		if err := cmd.Run(ctx, os.Args[1:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			os.Exit(connectorcli.ExitCode(err))
 		}
 		return
 	}
@@ -140,7 +205,7 @@ func main() {
 
 	if err := cmd.Run(ctx, os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(connectorcli.ExitCode(err))
 	}
 }
 

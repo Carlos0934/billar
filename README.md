@@ -101,18 +101,22 @@ Set `BILLAR_DB_PATH=/absolute/path/to/billar.db` to override this default. Billa
 
 ## Local backups
 
-Create and list SQLite-consistent local snapshots:
+Create, list, and safely restore SQLite-consistent local snapshots:
 
 ```bash
 billar backup create --format json
 billar backup list --format text
+billar backup restore --id billar-20260501T120000Z-schema4 --dry-run --format json
+billar backup restore --file /path/to/billar-20260501T120000Z-schema4.db --confirm billar-20260501T120000Z-schema4.db
 ```
 
 `billar backup create` writes a backup database file named like `billar-<utc>-schemaN.db` plus a matching `.db.json` sidecar containing `created_at`, `source_db_path`, `size_bytes`, `sha256`, and `schema_version`. Backup artifacts use `.db` and `.db.json`; Billar does not create `.sqlite` backup files. Backups contain sensitive billing and legal data; they are unencrypted local snapshots and should be protected like the live database.
 
 `billar backup list` reads the backup directory and sidecar metadata, returning the canonical `backups` array for machine formats. Entries without a sidecar can still be listed with `metadata: false`.
 
-Restore is intentionally deferred to future work and is not available/not implemented as a command in this slice. Until a safe restore lifecycle exists, the manual workaround is to stop Billar, copy the desired backup `.db` over the configured `BILLAR_DB_PATH`, then restart Billar.
+`billar backup restore` validates a sidecar-backed `.db` before replacing the configured `BILLAR_DB_PATH`. Select exactly one source with `--id <backup-id>` (looked up under `BILLAR_BACKUP_DIR`) or `--file <path-to-backup.db>`. Use `--dry-run` to print the restore plan without changing the live database. Destructive restores require `--confirm <token>` matching the backup ID or backup file basename, or `--force` for automation. Validation checks the sidecar, size, sha256, SQLite integrity, schema version, and required Billar tables; `--force` does not bypass validation.
+
+When the live DB exists, restore first creates a pre-restore safety snapshot in the backup directory and reports it in the output. If the live DB does not exist, restore proceeds with `safety_snapshot: null` and a warning. Every destructive restore attempt emits a `concurrent_processes` warning: stop other Billar processes and external SQLite clients before running it. Machine-format failures include `error.code` alongside the stable exit code meanings: `0` success/dry-run, `2` usage or confirmation errors, `3` validation failures, `4` snapshot/copy/rename runtime failures, and `5` unexpected internal errors.
 
 ## Migration: MCP tools → CLI commands
 
@@ -147,7 +151,7 @@ Billar is CLI-only. Use these command forms for workflows formerly exposed throu
 | `invoice.render_pdf` | `billar invoice pdf <invoice-id> --out <path>` |
 | `invoice.import` | `billar invoice import --file <path>` or `billar invoice import --stdin` |
 | `setup.*` | `billar setup` |
-| `backup.*` | `billar backup create` / `billar backup list` |
+| `backup.*` | `billar backup create` / `billar backup list` / `billar backup restore` |
 
 ### Invoice PDF export
 

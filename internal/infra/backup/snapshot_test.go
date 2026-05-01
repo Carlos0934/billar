@@ -68,28 +68,29 @@ func TestSnapshotterCreateWritesConsistentSQLiteBackupAndSidecar(t *testing.T) {
 	}
 }
 
-func TestSnapshotterCreateRefusesOverwriteAndCleansUpOnFailure(t *testing.T) {
+func TestSnapshotterCreateAvoidsCollisionsAndCleansUpOnFailure(t *testing.T) {
 	dbPath := createSQLiteSource(t)
 	now := time.Date(2026, 5, 1, 16, 30, 0, 0, time.UTC)
 
-	t.Run("overwrite refusal leaves existing file unchanged", func(t *testing.T) {
+	t.Run("existing snapshot id gets collision-resistant suffix", func(t *testing.T) {
 		destDir := t.TempDir()
-		existing := filepath.Join(destDir, "billar-20260501T163000Z-schema1.db")
-		if err := os.WriteFile(existing, []byte("keep me"), 0o600); err != nil {
-			t.Fatalf("WriteFile() error = %v", err)
-		}
 
-		_, err := Snapshotter{Now: func() time.Time { return now }}.Create(context.Background(), dbPath, destDir)
-		if err == nil || !strings.Contains(err.Error(), existing) {
-			t.Fatalf("Create() error = %v, want existing path", err)
-		}
-		got, err := os.ReadFile(existing)
+		first, err := Snapshotter{Now: func() time.Time { return now }}.Create(context.Background(), dbPath, destDir)
 		if err != nil {
-			t.Fatalf("ReadFile() error = %v", err)
+			t.Fatalf("first Create() error = %v", err)
 		}
-		if string(got) != "keep me" {
-			t.Fatalf("existing file mutated to %q", got)
+		second, err := Snapshotter{Now: func() time.Time { return now }}.Create(context.Background(), dbPath, destDir)
+		if err != nil {
+			t.Fatalf("second Create() error = %v", err)
 		}
+		if first.ID == second.ID || first.File == second.File {
+			t.Fatalf("Create() IDs/files collided: first=%+v second=%+v", first, second)
+		}
+		if !strings.HasPrefix(second.ID, "billar-20260501T163000Z-schema1-") {
+			t.Fatalf("second ID = %q, want timestamp/schema id with collision suffix", second.ID)
+		}
+		assertSQLiteIntegrity(t, first.File)
+		assertSQLiteIntegrity(t, second.File)
 	})
 
 	t.Run("vacuum failure removes temp and final files", func(t *testing.T) {

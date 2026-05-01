@@ -54,14 +54,10 @@ func (s Snapshotter) Create(ctx context.Context, dbPath, destDir string) (Record
 		return Record{}, fmt.Errorf("read schema version: %w", err)
 	}
 
-	id := fmt.Sprintf("billar-%s-schema%d", createdAt.Format("20060102T150405Z"), schemaVersion)
-	finalPath := filepath.Join(destDir, id+".db")
-	sidecarPath := finalPath + ".json"
-	tmpPath := finalPath + ".tmp"
-	if _, err := os.Stat(finalPath); err == nil {
-		return Record{}, fmt.Errorf("create backup: %s already exists", finalPath)
-	} else if !os.IsNotExist(err) {
-		return Record{}, fmt.Errorf("check backup target %q: %w", finalPath, err)
+	baseID := fmt.Sprintf("billar-%s-schema%d", createdAt.Format("20060102T150405Z"), schemaVersion)
+	id, finalPath, sidecarPath, tmpPath, err := nextSnapshotTarget(destDir, baseID)
+	if err != nil {
+		return Record{}, err
 	}
 
 	db, err := s.open(dbPath)
@@ -112,6 +108,47 @@ func (s Snapshotter) Create(ctx context.Context, dbPath, destDir string) (Record
 	}
 
 	return record, nil
+}
+
+func nextSnapshotTarget(destDir, baseID string) (string, string, string, string, error) {
+	for suffix := 0; suffix < 1000; suffix++ {
+		id := baseID
+		if suffix > 0 {
+			id = fmt.Sprintf("%s-%d", baseID, suffix)
+		}
+		finalPath := filepath.Join(destDir, id+".db")
+		sidecarPath := finalPath + ".json"
+		tmpPath := finalPath + ".tmp"
+		if err := pathAvailable(finalPath); err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			return "", "", "", "", fmt.Errorf("check backup target %q: %w", finalPath, err)
+		}
+		if err := pathAvailable(sidecarPath); err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			return "", "", "", "", fmt.Errorf("check backup sidecar target %q: %w", sidecarPath, err)
+		}
+		if err := pathAvailable(tmpPath); err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			return "", "", "", "", fmt.Errorf("check backup temp target %q: %w", tmpPath, err)
+		}
+		return id, finalPath, sidecarPath, tmpPath, nil
+	}
+	return "", "", "", "", fmt.Errorf("create backup: no available collision-resistant name for %s", baseID)
+}
+
+func pathAvailable(path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return os.ErrExist
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func (s Snapshotter) open(dbPath string) (vacuumDB, error) {

@@ -30,6 +30,8 @@ var baselineTableNames = []string{
 	"invoice_lines",
 }
 
+var RequiredBillarTables = append([]string(nil), baselineTableNames...)
+
 type migration struct {
 	version int
 	name    string
@@ -72,6 +74,17 @@ func applyMigrations(db *sql.DB, source fs.FS) error {
 	}
 
 	return nil
+}
+
+func LatestMigrationVersion() (int, error) {
+	migrations, err := loadMigrations(migrationsFS)
+	if err != nil {
+		return 0, fmt.Errorf("load embedded migrations: %w", err)
+	}
+	if len(migrations) == 0 {
+		return 0, nil
+	}
+	return migrations[len(migrations)-1].version, nil
 }
 
 func loadMigrations(source fs.FS) ([]migration, error) {

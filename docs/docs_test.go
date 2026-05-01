@@ -10,7 +10,7 @@ func TestREADMEGlobalSetupBackupContract(t *testing.T) {
 	t.Parallel()
 
 	readme := readLower(t, "../README.md")
-	for _, want := range []string{"make install", "bindir", "billar_backup_dir", "billar setup", "billar doctor", "billar backup create", "billar backup list", "sensitive", "unencrypted"} {
+	for _, want := range []string{"make install", "bindir", "billar_backup_dir", "billar setup", "billar doctor", "billar backup create", "billar backup list", "billar backup restore", "--dry-run", "--confirm", "--force", "exit code", "safety snapshot", "concurrent_processes", "sensitive", "unencrypted"} {
 		if !strings.Contains(readme, want) {
 			t.Fatalf("README missing %q", want)
 		}
@@ -24,11 +24,10 @@ func TestREADMEGlobalSetupBackupContract(t *testing.T) {
 	if !strings.Contains(readme, ".env") || !strings.Contains(readme, "current working directory") {
 		t.Fatalf("README must document cwd-only .env behavior")
 	}
-	if !strings.Contains(readme, "restore") || (!strings.Contains(readme, "future") && !strings.Contains(readme, "deferred")) {
-		t.Fatalf("README must document restore as future/deferred work")
-	}
-	if !strings.Contains(readme, "not available") && !strings.Contains(readme, "not implemented") {
-		t.Fatalf("README must state restore is not available/implemented")
+	for _, forbidden := range []string{"restore is intentionally deferred", "not available/not implemented"} {
+		if strings.Contains(readme, forbidden) {
+			t.Fatalf("README still contains obsolete restore wording %q", forbidden)
+		}
 	}
 }
 

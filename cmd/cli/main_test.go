@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Carlos0934/billar/internal/infra/backup"
 	"github.com/Carlos0934/billar/internal/infra/config"
 	infrasqlite "github.com/Carlos0934/billar/internal/infra/sqlite"
 )
@@ -108,6 +109,45 @@ func TestNewPreStoreCommandRunsSetupWithoutDoctorStore(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), cfg.BackupDir) {
 		t.Fatalf("setup output = %q, want backup dir", out.String())
+	}
+}
+
+func TestNewPreStoreCommandRunsBackupRestoreWithoutOpeningStore(t *testing.T) {
+	runtimeRoot := t.TempDir()
+	cfg := config.Config{AppName: "billar", ColorEnabled: false, DBPath: filepath.Join(runtimeRoot, "data", "billar.db"), DBPathSource: "configured", ExportDir: filepath.Join(runtimeRoot, "exports"), ExportDirSource: "configured", BackupDir: filepath.Join(runtimeRoot, "backups"), BackupDirSource: "configured"}
+	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o700); err != nil {
+		t.Fatalf("mkdir db dir: %v", err)
+	}
+	store, err := infrasqlite.Open(cfg.DBPath)
+	if err != nil {
+		t.Fatalf("seed store: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close seed store: %v", err)
+	}
+	record, err := backup.Snapshotter{Now: func() time.Time { return time.Date(2026, 5, 1, 18, 0, 0, 0, time.UTC) }}.Create(context.Background(), cfg.DBPath, cfg.BackupDir)
+	if err != nil {
+		t.Fatalf("create backup fixture: %v", err)
+	}
+	if err := os.Remove(cfg.DBPath); err != nil {
+		t.Fatalf("remove live db: %v", err)
+	}
+
+	cmd := newPreStoreCommand(cfg)
+	var dryRunOut bytes.Buffer
+	if err := cmd.Run(context.Background(), []string{"backup", "restore", "--id", record.ID, "--dry-run", "--format", "json"}, &dryRunOut); err != nil {
+		t.Fatalf("backup restore dry-run Run() error = %v, output = %q", err, dryRunOut.String())
+	}
+	if _, statErr := os.Stat(cfg.DBPath); !os.IsNotExist(statErr) {
+		t.Fatalf("db path stat after dry-run = %v, want no store open or restore mutation", statErr)
+	}
+
+	var restoreOut bytes.Buffer
+	if err := cmd.Run(context.Background(), []string{"backup", "restore", "--id", record.ID, "--force", "--format", "json"}, &restoreOut); err != nil {
+		t.Fatalf("backup restore force Run() error = %v, output = %q", err, restoreOut.String())
+	}
+	if _, err := os.Stat(cfg.DBPath); err != nil {
+		t.Fatalf("db path after destructive restore: %v", err)
 	}
 }
 

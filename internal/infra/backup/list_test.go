@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -60,6 +61,69 @@ func TestListerList(t *testing.T) {
 		}
 		if got[1].File != withMetaDB || !got[1].Metadata || got[1].SchemaVersion != 7 || got[1].SHA256 != "abc" {
 			t.Fatalf("second record = %+v, want parsed sidecar", got[1])
+		}
+	})
+}
+
+func TestLookupByID(t *testing.T) {
+	t.Run("hit returns sidecar-backed record", func(t *testing.T) {
+		dir := t.TempDir()
+		createdAt := time.Date(2026, 5, 1, 11, 0, 0, 0, time.UTC)
+		dbPath := filepath.Join(dir, "billar-20260501T110000Z-schema7.db")
+		writeFile(t, dbPath, "sqlite")
+		writeJSON(t, dbPath+".json", Record{
+			ID:            "billar-20260501T110000Z-schema7",
+			CreatedAt:     createdAt,
+			SchemaVersion: 7,
+			SizeBytes:     6,
+			SHA256:        "abc",
+			SourceDBPath:  "/source.db",
+			Metadata:      true,
+		})
+
+		got, err := LookupByID(dir, "billar-20260501T110000Z-schema7")
+		if err != nil {
+			t.Fatalf("LookupByID() error = %v", err)
+		}
+		if got.ID != "billar-20260501T110000Z-schema7" || got.File != dbPath || got.SidecarFile != dbPath+".json" || got.SchemaVersion != 7 || got.SHA256 != "abc" || !got.Metadata {
+			t.Fatalf("LookupByID() = %+v, want sidecar-backed record", got)
+		}
+	})
+
+	t.Run("not found returns clear error", func(t *testing.T) {
+		_, err := LookupByID(t.TempDir(), "missing")
+		if err == nil || !strings.Contains(err.Error(), "backup missing not found") {
+			t.Fatalf("LookupByID() error = %v, want not found", err)
+		}
+	})
+
+	t.Run("orphan db is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, filepath.Join(dir, "orphan.db"), "sqlite")
+
+		_, err := LookupByID(dir, "orphan")
+		if err == nil || !strings.Contains(err.Error(), "sidecar_missing") {
+			t.Fatalf("LookupByID() error = %v, want sidecar_missing", err)
+		}
+	})
+
+	t.Run("sidecar id must match db basename", func(t *testing.T) {
+		dir := t.TempDir()
+		dbPath := filepath.Join(dir, "billar-20260501T110000Z-schema7.db")
+		writeFile(t, dbPath, "sqlite")
+		writeJSON(t, dbPath+".json", Record{
+			ID:            "different-id",
+			CreatedAt:     time.Date(2026, 5, 1, 11, 0, 0, 0, time.UTC),
+			SchemaVersion: 7,
+			SizeBytes:     6,
+			SHA256:        "abc",
+			SourceDBPath:  "/source.db",
+			Metadata:      true,
+		})
+
+		_, err := LookupByID(dir, "billar-20260501T110000Z-schema7")
+		if err == nil || !strings.Contains(err.Error(), "id_basename_mismatch") {
+			t.Fatalf("LookupByID() error = %v, want id_basename_mismatch", err)
 		}
 	})
 }

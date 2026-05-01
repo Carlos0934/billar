@@ -221,14 +221,14 @@ func TestCommandHelpIncludesGlobalSetupBackup(t *testing.T) {
 		t.Fatalf("Run(--help) error = %v", err)
 	}
 	got := out.String()
-	for _, want := range []string{"setup", "backup <create|list>", "doctor"} {
+	for _, want := range []string{"setup", "backup <create|list|restore>", "doctor"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("help output missing %q:\n%s", want, got)
 		}
 	}
 }
 
-func TestBackupHelpListsOnlyCreateAndList(t *testing.T) {
+func TestBackupHelpListsCreateListAndRestore(t *testing.T) {
 	t.Parallel()
 
 	cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, nil, nil, nil, nil, false)
@@ -237,8 +237,8 @@ func TestBackupHelpListsOnlyCreateAndList(t *testing.T) {
 		t.Fatalf("Run(backup --help) error = %v", err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "create") || !strings.Contains(got, "list") || strings.Contains(got, "restore") {
-		t.Fatalf("backup help output = %q, want create/list only", got)
+	if !strings.Contains(got, "create") || !strings.Contains(got, "list") || !strings.Contains(got, "restore") {
+		t.Fatalf("backup help output = %q, want create/list/restore", got)
 	}
 }
 
