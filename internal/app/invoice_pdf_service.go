@@ -127,10 +127,10 @@ func (s InvoicePDFService) buildDocument(ctx context.Context, invoiceID string) 
 
 	lines := make([]InvoiceDocumentLineDTO, 0, len(invDTO.Lines))
 	for _, line := range invDTO.Lines {
-		lines = append(lines, InvoiceDocumentLineDTO{Description: line.Description, QuantityMin: line.QuantityMin, UnitRateAmount: line.UnitRateAmount, UnitRateCurrency: line.UnitRateCurrency, LineTotalAmount: line.LineTotalAmount, LineTotalCurrency: line.LineTotalCurrency})
+		lines = append(lines, InvoiceDocumentLineDTO{Description: line.Description, QuantityMin: line.QuantityMin, UnitRateAmount: line.UnitRateAmount, UnitRateCurrency: line.UnitRateCurrency, LineTotalAmount: line.LineTotalAmount, LineTotalCurrency: line.LineTotalCurrency, TaxMinor: line.TaxMinor, UnitPriceDisplay: line.UnitPriceDisplay, QuantityDisplay: line.QuantityDisplay})
 	}
 
-	return InvoiceDocumentDTO{InvoiceID: invDTO.ID, InvoiceNumber: invDTO.InvoiceNumber, Status: invDTO.Status, Currency: invDTO.Currency, PeriodStart: invDTO.PeriodStart, PeriodEnd: invDTO.PeriodEnd, DueDate: invDTO.DueDate, IssuedAt: invDTO.IssuedAt, CreatedAt: invDTO.CreatedAt, Issuer: invoiceDocumentParty(*issuerEntity), Customer: invoiceDocumentParty(*customerEntity), Lines: lines, Subtotal: invDTO.Subtotal, GrandTotal: invDTO.GrandTotal, Notes: invDTO.Notes}, nil
+	return InvoiceDocumentDTO{InvoiceID: invDTO.ID, InvoiceNumber: invDTO.InvoiceNumber, Status: invDTO.Status, Currency: invDTO.Currency, PeriodStart: invDTO.PeriodStart, PeriodEnd: invDTO.PeriodEnd, DueDate: invDTO.DueDate, InvoiceDate: formatInvoiceTime(invoice.InvoiceDate), IssuedAt: invDTO.IssuedAt, CreatedAt: invDTO.CreatedAt, PaymentTerms: invoice.PaymentTerms, PaymentComm: invoice.PaymentCommunication, Issuer: invoiceDocumentParty(*issuerEntity), Customer: invoiceDocumentParty(*customerEntity), Lines: lines, Subtotal: invDTO.Subtotal, GrandTotal: invDTO.GrandTotal, Notes: invDTO.Notes}, nil
 }
 
 func invoiceDocumentParty(entity core.LegalEntity) InvoiceDocumentPartyDTO {

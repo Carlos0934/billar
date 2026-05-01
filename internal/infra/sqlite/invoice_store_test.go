@@ -185,6 +185,86 @@ func TestInvoiceStoreUpdate(t *testing.T) {
 	}
 }
 
+func TestInvoiceStoreUpdateMetadata(t *testing.T) {
+	t.Parallel()
+
+	store, err := Open("")
+	if err != nil {
+		t.Fatalf("Open(): %v", err)
+	}
+	defer store.Close()
+
+	customerID, agreementID := seedCustomerAndAgreement(t, store)
+	entry := &core.TimeEntry{ID: "te_001", ServiceAgreementID: agreementID, CustomerProfileID: customerID, Description: "Work", Hours: mustHours(15000), Billable: true, Date: time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	if err := NewTimeEntryStore(store).Save(context.Background(), entry); err != nil {
+		t.Fatalf("save entry: %v", err)
+	}
+	rate, _ := core.NewMoney(10000, "USD")
+	line, _ := core.NewInvoiceLine(core.InvoiceLineParams{InvoiceID: "inv_seed", ServiceAgreementID: agreementID, TimeEntryID: entry.ID, UnitRate: rate})
+	invoice, _ := core.NewInvoice(core.InvoiceParams{CustomerID: customerID, Status: core.InvoiceStatusDraft, Currency: "USD", Lines: []core.InvoiceLine{line}, PeriodStart: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), PeriodEnd: time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC), DueDate: time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC), Notes: "Old notes", CreatedAt: time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)})
+	invStore := NewInvoiceStore(store)
+	if err := invStore.CreateDraft(context.Background(), &invoice, []*core.TimeEntry{entry}); err != nil {
+		t.Fatalf("CreateDraft() error = %v", err)
+	}
+	issuedAt := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	if err := invoice.Issue("INV-2026-0001", issuedAt); err != nil {
+		t.Fatalf("Issue() error = %v", err)
+	}
+	if err := invStore.Update(context.Background(), &invoice); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	before, err := invStore.GetByID(context.Background(), invoice.ID)
+	if err != nil {
+		t.Fatalf("GetByID(before) error = %v", err)
+	}
+
+	if err := invoice.UpdateMetadata(core.InvoiceMetadataPatch{InvoiceDate: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), DueDate: time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC), PaymentTerms: "Net 20", PaymentCommunication: "Use updated reference", Notes: "Updated notes", ExternalNumber: "EXT-UPDATED"}); err != nil {
+		t.Fatalf("UpdateMetadata(core) error = %v", err)
+	}
+	if err := invStore.UpdateMetadata(context.Background(), &invoice); err != nil {
+		t.Fatalf("UpdateMetadata() error = %v", err)
+	}
+
+	got, err := invStore.GetByID(context.Background(), invoice.ID)
+	if err != nil {
+		t.Fatalf("GetByID(after) error = %v", err)
+	}
+	if got.InvoiceDate.Format(time.RFC3339) != "2026-05-01T00:00:00Z" || got.DueDate.Format(time.RFC3339) != "2026-05-20T00:00:00Z" || got.PaymentTerms != "Net 20" || got.PaymentCommunication != "Use updated reference" || got.Notes != "Updated notes" || got.ExternalNumber != "EXT-UPDATED" {
+		t.Fatalf("metadata after UpdateMetadata = %+v, want updated listed fields", got)
+	}
+	if got.InvoiceNumber != before.InvoiceNumber || !got.IssuedAt.Equal(before.IssuedAt) || got.Status != before.Status || got.CustomerID != before.CustomerID {
+		t.Fatalf("non-metadata invoice fields changed: before=%+v after=%+v", before, got)
+	}
+	if len(got.Lines) != 1 || got.Lines[0].ID != before.Lines[0].ID || got.Total(nil).Amount != before.Total(nil).Amount {
+		t.Fatalf("lines/totals changed: before=%+v total=%+v after=%+v total=%+v", before.Lines, before.Total(nil), got.Lines, got.Total(nil))
+	}
+	if !got.UpdatedAt.After(before.UpdatedAt) {
+		t.Fatalf("UpdatedAt = %s, want after %s", got.UpdatedAt, before.UpdatedAt)
+	}
+}
+
+func TestInvoiceStoreHealthChecks(t *testing.T) {
+	t.Parallel()
+
+	store, err := Open("")
+	if err != nil {
+		t.Fatalf("Open(): %v", err)
+	}
+	defer store.Close()
+
+	invStore := NewInvoiceStore(store)
+	if err := invStore.Ping(context.Background()); err != nil {
+		t.Fatalf("Ping() error = %v", err)
+	}
+	version, err := invStore.SchemaVersion(context.Background())
+	if err != nil {
+		t.Fatalf("SchemaVersion() error = %v", err)
+	}
+	if version < 0 {
+		t.Fatalf("SchemaVersion() = %d, want non-negative", version)
+	}
+}
+
 func TestInvoiceStoreDelete(t *testing.T) {
 	t.Parallel()
 
@@ -594,6 +674,132 @@ func TestInvoiceStoreAddLineRemoveLineAndSnapshotTotals(t *testing.T) {
 	if len(got.Lines) != 1 || got.Lines[0].ID != manual.ID {
 		t.Fatalf("lines after remove = %+v, want only manual", got.Lines)
 	}
+}
+
+func TestInvoiceStoreImportIssuedRoundTripAndDuplicate(t *testing.T) {
+	t.Parallel()
+
+	store, err := Open("")
+	if err != nil {
+		t.Fatalf("Open(): %v", err)
+	}
+	defer store.Close()
+	customerID, _ := seedCustomerAndAgreement(t, store)
+	invoice := importedInvoiceForStoreTest(t, customerID, "INV/2026/00001")
+	invStore := NewInvoiceStore(store)
+	if err := invStore.ImportIssued(context.Background(), &invoice); err != nil {
+		t.Fatalf("ImportIssued() error = %v", err)
+	}
+	got, err := invStore.GetByID(context.Background(), invoice.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if got.InvoiceNumber != "INV/2026/00001" || got.Status != core.InvoiceStatusIssued || !got.InvoiceDate.Equal(invoice.InvoiceDate) || got.PaymentCommunication != "INV/2026/00001" || got.Lines[0].AmountMinor != 250000 || got.Lines[0].QuantityDisplay != "160.00" {
+		t.Fatalf("round trip invoice = %+v line=%+v, want imported fields", got, got.Lines[0])
+	}
+	summaries, err := invStore.ListByCustomer(context.Background(), customerID, core.InvoiceStatusIssued)
+	if err != nil {
+		t.Fatalf("ListByCustomer() error = %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].GrandTotal != 250000 {
+		t.Fatalf("summaries = %+v, want imported grand total", summaries)
+	}
+	duplicate := importedInvoiceForStoreTest(t, customerID, "INV/2026/00001")
+	if err := invStore.ImportIssued(context.Background(), &duplicate); err == nil {
+		t.Fatal("ImportIssued(duplicate) error = nil, want duplicate error")
+	}
+
+	var timeEntryCount int
+	if err := store.DB().QueryRow(`SELECT COUNT(*) FROM time_entries WHERE invoice_id = ?`, invoice.ID).Scan(&timeEntryCount); err != nil {
+		t.Fatalf("count time entries: %v", err)
+	}
+	if timeEntryCount != 0 {
+		t.Fatalf("time entries touched = %d, want 0", timeEntryCount)
+	}
+}
+
+func TestInvoiceStoreListByCustomerIncludesImportedTax(t *testing.T) {
+	t.Parallel()
+
+	store, err := Open("")
+	if err != nil {
+		t.Fatalf("Open(): %v", err)
+	}
+	defer store.Close()
+	customerID, _ := seedCustomerAndAgreement(t, store)
+	line, err := core.NewImportedInvoiceLine(core.ImportInvoiceLineParams{Description: "Taxable service", AmountMinor: 100000, TaxMinor: 21000, QuantityDisplay: "1.00", UnitPriceDisplay: "1000.00", Currency: "USD"})
+	if err != nil {
+		t.Fatalf("NewImportedInvoiceLine(): %v", err)
+	}
+	invoice, err := core.NewImportedInvoice(core.ImportInvoiceParams{CustomerID: customerID, InvoiceNumber: "INV/2026/TAX", InvoiceDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), DueDate: time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC), Currency: "USD", Lines: []core.InvoiceLine{line}, SubtotalMinor: 100000, TaxTotalMinor: 21000, GrandTotalMinor: 121000})
+	if err != nil {
+		t.Fatalf("NewImportedInvoice(): %v", err)
+	}
+	invStore := NewInvoiceStore(store)
+	if err := invStore.ImportIssued(context.Background(), &invoice); err != nil {
+		t.Fatalf("ImportIssued() error = %v", err)
+	}
+
+	summaries, err := invStore.ListByCustomer(context.Background(), customerID, core.InvoiceStatusIssued)
+	if err != nil {
+		t.Fatalf("ListByCustomer() error = %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].GrandTotal != 121000 {
+		t.Fatalf("summaries = %+v, want imported grand total including tax 121000", summaries)
+	}
+}
+
+func TestInvoiceStoreImportIssuedRollsBackLineInsertFailure(t *testing.T) {
+	t.Parallel()
+
+	store, err := Open("")
+	if err != nil {
+		t.Fatalf("Open(): %v", err)
+	}
+	defer store.Close()
+	customerID, _ := seedCustomerAndAgreement(t, store)
+	line1, err := core.NewImportedInvoiceLine(core.ImportInvoiceLineParams{Description: "First line", AmountMinor: 60000, Currency: "USD"})
+	if err != nil {
+		t.Fatalf("NewImportedInvoiceLine(line1): %v", err)
+	}
+	line2, err := core.NewImportedInvoiceLine(core.ImportInvoiceLineParams{Description: "Second line", AmountMinor: 40000, Currency: "USD"})
+	if err != nil {
+		t.Fatalf("NewImportedInvoiceLine(line2): %v", err)
+	}
+	line2.ID = line1.ID
+	invoice, err := core.NewImportedInvoice(core.ImportInvoiceParams{CustomerID: customerID, InvoiceNumber: "INV/2026/ROLLBACK", InvoiceDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), DueDate: time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC), Currency: "USD", Lines: []core.InvoiceLine{line1, line2}, SubtotalMinor: 100000, GrandTotalMinor: 100000})
+	if err != nil {
+		t.Fatalf("NewImportedInvoice(): %v", err)
+	}
+	invStore := NewInvoiceStore(store)
+	err = invStore.ImportIssued(context.Background(), &invoice)
+	if err == nil {
+		t.Fatal("ImportIssued() error = nil, want duplicate line id insert failure")
+	}
+
+	var invoiceRows, lineRows int
+	if err := store.DB().QueryRow(`SELECT COUNT(*) FROM invoices WHERE id = ?`, invoice.ID).Scan(&invoiceRows); err != nil {
+		t.Fatalf("count invoices: %v", err)
+	}
+	if err := store.DB().QueryRow(`SELECT COUNT(*) FROM invoice_lines WHERE invoice_id = ?`, invoice.ID).Scan(&lineRows); err != nil {
+		t.Fatalf("count invoice lines: %v", err)
+	}
+	if invoiceRows != 0 || lineRows != 0 {
+		t.Fatalf("rolled back rows = invoices:%d lines:%d, want both 0", invoiceRows, lineRows)
+	}
+}
+
+func importedInvoiceForStoreTest(t *testing.T, customerID, number string) core.Invoice {
+	t.Helper()
+	line, err := core.NewImportedInvoiceLine(core.ImportInvoiceLineParams{Description: "Software development", AmountMinor: 250000, QuantityDisplay: "160.00", UnitPriceDisplay: "15.6250", Currency: "USD"})
+	if err != nil {
+		t.Fatalf("NewImportedInvoiceLine(): %v", err)
+	}
+	invoice, err := core.NewImportedInvoice(core.ImportInvoiceParams{CustomerID: customerID, InvoiceNumber: number, InvoiceDate: time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC), DueDate: time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC), Currency: "USD", PaymentTerms: "15 Days", PaymentCommunication: number, ImportSource: "manual-pdf-extract", ExternalNumber: number, ImportedAt: time.Date(2026, 4, 26, 13, 25, 34, 0, time.UTC), Lines: []core.InvoiceLine{line}, SubtotalMinor: 250000, GrandTotalMinor: 250000})
+	if err != nil {
+		t.Fatalf("NewImportedInvoice(): %v", err)
+	}
+	return invoice
 }
 
 // seedCustomerAndAgreement creates a minimal customer profile and service agreement for testing.

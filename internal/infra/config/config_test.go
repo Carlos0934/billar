@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -22,6 +21,7 @@ func TestLoadParsesAppNameFromEnvironment(t *testing.T) {
 	for _, key := range []string{
 		"BILLAR_APP_NAME",
 		"BILLAR_EXPORT_DIR",
+		"BILLAR_BACKUP_DIR",
 		"BILLAR_DB_PATH",
 		"XDG_DATA_HOME",
 		"XDG_CONFIG_HOME",
@@ -40,10 +40,14 @@ func TestLoadParsesAppNameFromEnvironment(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	want := Config{
-		AppName:      "session-surface",
-		ColorEnabled: true,
-		ExportDir:    "",
-		DBPath:       filepath.Join(home, ".config", "billar", "billar.db"),
+		AppName:         "session-surface",
+		ColorEnabled:    true,
+		ExportDir:       filepath.Join(home, ".config", "billar", "exports"),
+		ExportDirSource: "default",
+		BackupDir:       filepath.Join(home, ".config", "billar", "backups"),
+		BackupDirSource: "default",
+		DBPath:          filepath.Join(home, ".config", "billar", "billar.db"),
+		DBPathSource:    "default",
 	}
 
 	if !reflect.DeepEqual(got, want) {
@@ -54,7 +58,7 @@ func TestLoadParsesAppNameFromEnvironment(t *testing.T) {
 func TestLoadReadsDotEnvFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".env")
-	content := []byte("BILLAR_APP_NAME=from-file\nBILLAR_EXPORT_DIR=/tmp/billar-exports\n")
+	content := []byte("BILLAR_APP_NAME=from-file\nBILLAR_EXPORT_DIR=/tmp/billar-exports\nBILLAR_BACKUP_DIR=/tmp/backups\n")
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -70,6 +74,7 @@ func TestLoadReadsDotEnvFile(t *testing.T) {
 
 	t.Setenv("BILLAR_APP_NAME", "")
 	t.Setenv("BILLAR_EXPORT_DIR", "")
+	t.Setenv("BILLAR_BACKUP_DIR", "")
 	t.Setenv("BILLAR_DB_PATH", "/tmp/billar-test.db")
 
 	got, err := Load()
@@ -77,10 +82,14 @@ func TestLoadReadsDotEnvFile(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	want := Config{
-		AppName:      "from-file",
-		ColorEnabled: true,
-		ExportDir:    "/tmp/billar-exports",
-		DBPath:       "/tmp/billar-test.db",
+		AppName:         "from-file",
+		ColorEnabled:    true,
+		ExportDir:       "/tmp/billar-exports",
+		ExportDirSource: "configured",
+		BackupDir:       "/tmp/backups",
+		BackupDirSource: "configured",
+		DBPath:          "/tmp/billar-test.db",
+		DBPathSource:    "configured",
 	}
 
 	if !reflect.DeepEqual(got, want) {
@@ -95,6 +104,7 @@ func TestConfigHasNoAccessPolicyField(t *testing.T) {
 		AppName:      "test",
 		ColorEnabled: true,
 		ExportDir:    "",
+		BackupDir:    "",
 		DBPath:       "/tmp/billar.db",
 	}
 	_ = cfg
@@ -124,6 +134,33 @@ func TestLoadParsesExportDirFromEnvironment(t *testing.T) {
 	}
 	if got.ExportDir != "/var/billar/exports" {
 		t.Fatalf("Load().ExportDir = %q, want trimmed export dir", got.ExportDir)
+	}
+}
+
+func TestLoadParsesBackupDirFromEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	t.Setenv("BILLAR_APP_NAME", "")
+	t.Setenv("BILLAR_EXPORT_DIR", "")
+	t.Setenv("BILLAR_BACKUP_DIR", " /var/billar/backups ")
+	t.Setenv("BILLAR_DB_PATH", "/tmp/billar-test.db")
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "")
+
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.BackupDir != "/var/billar/backups" {
+		t.Fatalf("Load().BackupDir = %q, want trimmed backup dir", got.BackupDir)
 	}
 }
 
@@ -184,7 +221,7 @@ func TestLoadPopulatesDefaultDBPath(t *testing.T) {
 	}
 }
 
-func TestLoadCreatesDefaultDBParentDirectory(t *testing.T) {
+func TestLoadPopulatesDefaultRuntimeDirsWithoutCreatingThem(t *testing.T) {
 	dir := t.TempDir()
 	oldwd, err := os.Getwd()
 	if err != nil {
@@ -212,19 +249,18 @@ func TestLoadCreatesDefaultDBParentDirectory(t *testing.T) {
 	if got.DBPath != filepath.Join(wantDir, "billar.db") {
 		t.Fatalf("Load().DBPath = %q, want path under %q", got.DBPath, wantDir)
 	}
-	info, err := os.Stat(wantDir)
-	if err != nil {
-		t.Fatalf("Stat(%q) error = %v", wantDir, err)
+	if got.ExportDir != filepath.Join(wantDir, "exports") {
+		t.Fatalf("Load().ExportDir = %q, want default export dir", got.ExportDir)
 	}
-	if !info.IsDir() {
-		t.Fatalf("%q is not a directory", wantDir)
+	if got.BackupDir != filepath.Join(wantDir, "backups") {
+		t.Fatalf("Load().BackupDir = %q, want default backup dir", got.BackupDir)
 	}
-	if gotMode := info.Mode().Perm(); gotMode != 0o700 {
-		t.Fatalf("default DB directory mode = %o, want 700", gotMode)
+	if _, err := os.Stat(wantDir); !os.IsNotExist(err) {
+		t.Fatalf("Load() created %q or returned unexpected stat error %v; setup owns directory creation", wantDir, err)
 	}
 }
 
-func TestLoadReportsDefaultDBParentDirectoryCreationFailure(t *testing.T) {
+func TestLoadDoesNotCreateOrValidateDefaultDBParentDirectory(t *testing.T) {
 	dir := t.TempDir()
 	oldwd, err := os.Getwd()
 	if err != nil {
@@ -247,13 +283,11 @@ func TestLoadReportsDefaultDBParentDirectoryCreationFailure(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", configHomeFile)
 	t.Setenv("HOME", t.TempDir())
 
-	_, err = Load()
-	if err == nil {
-		t.Fatal("Load() error = nil, want directory creation failure")
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
 	}
-	for _, want := range []string{wantPath, "BILLAR_DB_PATH"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("Load() error = %q, want containing %q", err, want)
-		}
+	if got.DBPath != wantPath {
+		t.Fatalf("Load().DBPath = %q, want %q", got.DBPath, wantPath)
 	}
 }

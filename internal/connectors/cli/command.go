@@ -15,6 +15,19 @@ type HealthStatusProvider interface {
 	Status(ctx context.Context) (app.HealthDTO, error)
 }
 
+type DoctorStatusProvider interface {
+	Report(ctx context.Context) (app.DoctorReportDTO, error)
+}
+
+type SetupServiceProvider interface {
+	Run(ctx context.Context) (app.SetupReportDTO, error)
+}
+
+type BackupServiceProvider interface {
+	Create(ctx context.Context) (app.BackupRecordDTO, error)
+	List(ctx context.Context) (app.BackupListDTO, error)
+}
+
 type Command struct {
 	health       HealthStatusProvider
 	legalEntity  LegalEntityServiceProvider
@@ -23,12 +36,21 @@ type Command struct {
 	agreement    AgreementServiceProvider
 	timeEntry    TimeEntryServiceProvider
 	invoice      InvoiceServiceProvider
+	doctor       DoctorStatusProvider
+	setup        SetupServiceProvider
+	backup       BackupServiceProvider
+	exportDir    string
 	colorEnabled bool
+	stdin        io.Reader
 }
 
-const commandUsage = "usage: billar <health|status|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>|agreement <create|get|list|update-rate|activate|deactivate>|time-entry <record|get|update|delete|list|list-unbilled>|invoice <draft|issue|discard|show|list|pdf|line>> [flags]"
+const commandUsage = "usage: billar <health|status|doctor|setup|backup <create|list>|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>|agreement <create|get|list|update-rate|activate|deactivate>|time-entry <record|get|update|delete|list|list-unbilled>|invoice <draft|issue|discard|show|list|inspect|update-metadata|pdf|line>> [flags]"
 
-func NewCommand(health HealthStatusProvider, legalEntity LegalEntityServiceProvider, issuer IssuerProfileServiceProvider, customer CustomerProfileServiceProvider, agreement AgreementServiceProvider, timeEntry TimeEntryServiceProvider, invoice InvoiceServiceProvider, colorEnabled bool) Command {
+func NewCommand(health HealthStatusProvider, legalEntity LegalEntityServiceProvider, issuer IssuerProfileServiceProvider, customer CustomerProfileServiceProvider, agreement AgreementServiceProvider, timeEntry TimeEntryServiceProvider, invoice InvoiceServiceProvider, colorEnabled bool, optional ...DoctorStatusProvider) Command {
+	var doctor DoctorStatusProvider
+	if len(optional) > 0 {
+		doctor = optional[0]
+	}
 	return Command{
 		health:       health,
 		legalEntity:  legalEntity,
@@ -37,8 +59,25 @@ func NewCommand(health HealthStatusProvider, legalEntity LegalEntityServiceProvi
 		agreement:    agreement,
 		timeEntry:    timeEntry,
 		invoice:      invoice,
+		doctor:       doctor,
 		colorEnabled: colorEnabled,
+		stdin:        nil,
 	}
+}
+
+func (c Command) WithExportDir(exportDir string) Command {
+	c.exportDir = strings.TrimSpace(exportDir)
+	return c
+}
+
+func (c Command) WithSetupService(setup SetupServiceProvider) Command {
+	c.setup = setup
+	return c
+}
+
+func (c Command) WithBackupService(backup BackupServiceProvider) Command {
+	c.backup = backup
+	return c
 }
 
 func (c Command) Run(ctx context.Context, args []string, out io.Writer) error {
@@ -51,6 +90,10 @@ func (c Command) Run(ctx context.Context, args []string, out io.Writer) error {
 	}
 
 	subcommand := strings.ToLower(args[0])
+	if subcommand == "--help" || subcommand == "-h" || subcommand == "help" {
+		_, err := io.WriteString(out, commandUsage+"\n")
+		return err
+	}
 	switch subcommand {
 	case "health", "status":
 		format, err := parseFormatFlag(subcommand, args[1:])
@@ -90,6 +133,15 @@ func (c Command) Run(ctx context.Context, args []string, out io.Writer) error {
 
 	case "time-entry":
 		return c.runTimeEntry(ctx, args[1:], out)
+
+	case "doctor":
+		return c.runDoctor(ctx, args[1:], out)
+
+	case "setup":
+		return c.runSetup(ctx, args[1:], out)
+
+	case "backup":
+		return c.runBackup(ctx, args[1:], out)
 
 	case "invoice":
 		return c.runInvoice(ctx, args[1:], out)

@@ -1,0 +1,13 @@
+{
+  "schema": "billar.invoice.import/v1",
+  "invoice_number": "INV/2026/00002",
+  "invoice_date": "2026-03-02",
+  "due_date": "2026-03-17",
+  "currency": "USD",
+  "customer": { "customer_profile_id": "cus_existing" },
+  "issuer": { "issuer_profile_id": "iss_existing" },
+  "lines": [
+    { "description": "Consulting services", "quantity_display": "80.00", "unit_price_display": "25.0000", "amount_minor": 200000 }
+  ],
+  "totals": { "subtotal_minor": 200000, "tax_total_minor": 0, "grand_total_minor": 200000 }
+}

@@ -300,6 +300,139 @@ func TestNewInvoiceMetadataValidation(t *testing.T) {
 	}
 }
 
+func TestInvoiceUpdateMetadata(t *testing.T) {
+	t.Parallel()
+
+	original := testInvoiceForMetadataUpdate(t, InvoiceStatusIssued)
+	original.IssuedAt = time.Date(2026, 4, 10, 9, 30, 0, 0, time.UTC)
+	original.InvoiceNumber = "INV-2026-0001"
+	original.ImportSource = "manual-pdf-extract"
+	original.ImportedAt = time.Date(2026, 4, 26, 13, 25, 34, 0, time.UTC)
+	original.ExternalNumber = "EXT-OLD"
+	original.CreatedAt = time.Date(2026, 4, 1, 8, 0, 0, 0, time.UTC)
+	original.UpdatedAt = original.CreatedAt
+	original.Lines = []InvoiceLine{{ID: "inl_keep", InvoiceID: original.ID, Description: "Development", QuantityMin: 60, UnitRate: Money{Amount: 10000, Currency: "USD"}}}
+
+	updated := original
+	newInvoiceDate := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	newPeriodStart := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	newPeriodEnd := time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC)
+	newDueDate := time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
+
+	if err := updated.UpdateMetadata(InvoiceMetadataPatch{
+		InvoiceDate:          newInvoiceDate,
+		PeriodStart:          newPeriodStart,
+		PeriodEnd:            newPeriodEnd,
+		DueDate:              newDueDate,
+		PaymentTerms:         "Net 15",
+		PaymentCommunication: "Use invoice INV-2026-0001",
+		Notes:                "Updated notes",
+		ExternalNumber:       "EXT-NEW",
+	}); err != nil {
+		t.Fatalf("UpdateMetadata() error = %v", err)
+	}
+
+	if !updated.InvoiceDate.Equal(newInvoiceDate) || !updated.PeriodStart.Equal(newPeriodStart) || !updated.PeriodEnd.Equal(newPeriodEnd) || !updated.DueDate.Equal(newDueDate) {
+		t.Fatalf("updated dates = (%s,%s,%s,%s), want (%s,%s,%s,%s)", updated.InvoiceDate, updated.PeriodStart, updated.PeriodEnd, updated.DueDate, newInvoiceDate, newPeriodStart, newPeriodEnd, newDueDate)
+	}
+	if updated.PaymentTerms != "Net 15" || updated.PaymentCommunication != "Use invoice INV-2026-0001" || updated.Notes != "Updated notes" || updated.ExternalNumber != "EXT-NEW" {
+		t.Fatalf("updated strings = (%q,%q,%q,%q), want metadata strings", updated.PaymentTerms, updated.PaymentCommunication, updated.Notes, updated.ExternalNumber)
+	}
+	if updated.InvoiceNumber != original.InvoiceNumber || !updated.IssuedAt.Equal(original.IssuedAt) || !updated.CreatedAt.Equal(original.CreatedAt) || updated.ImportSource != original.ImportSource || !updated.ImportedAt.Equal(original.ImportedAt) {
+		t.Fatalf("immutable identity changed: before=%+v after=%+v", original, updated)
+	}
+	if len(updated.Lines) != len(original.Lines) || updated.Lines[0].ID != original.Lines[0].ID || updated.Total(nil).Amount != original.Total(nil).Amount {
+		t.Fatalf("financial data changed: before lines=%+v total=%+v after lines=%+v total=%+v", original.Lines, original.Total(nil), updated.Lines, updated.Total(nil))
+	}
+	if !updated.UpdatedAt.After(original.UpdatedAt) {
+		t.Fatalf("UpdatedAt = %s, want after %s", updated.UpdatedAt, original.UpdatedAt)
+	}
+}
+
+func TestInvoiceUpdateMetadataValidation(t *testing.T) {
+	t.Parallel()
+
+	validPeriodStart := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	validPeriodEnd := time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC)
+	validDueDate := time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name       string
+		status     InvoiceStatus
+		patch      InvoiceMetadataPatch
+		wantErr    string
+		wantDueDay int
+	}{
+		{
+			name:       "draft accepts metadata patch",
+			status:     InvoiceStatusDraft,
+			patch:      InvoiceMetadataPatch{PeriodStart: validPeriodStart, PeriodEnd: validPeriodEnd, DueDate: validDueDate, PaymentTerms: "Net 15"},
+			wantDueDay: 15,
+		},
+		{
+			name:    "discarded invoices are rejected",
+			status:  InvoiceStatusDiscarded,
+			patch:   InvoiceMetadataPatch{PaymentTerms: "Net 15"},
+			wantErr: "discarded",
+		},
+		{
+			name:    "due date before period end is rejected",
+			status:  InvoiceStatusIssued,
+			patch:   InvoiceMetadataPatch{PeriodStart: validPeriodStart, PeriodEnd: validPeriodEnd, DueDate: validPeriodStart},
+			wantErr: "due_date must be on or after period_end",
+		},
+		{
+			name:    "period end before period start is rejected",
+			status:  InvoiceStatusIssued,
+			patch:   InvoiceMetadataPatch{PeriodStart: validPeriodEnd, PeriodEnd: validPeriodStart},
+			wantErr: "period_end must be on or after period_start",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			invoice := testInvoiceForMetadataUpdate(t, tt.status)
+			before := invoice
+			err := invoice.UpdateMetadata(tt.patch)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("UpdateMetadata() error = %v, want substring %q", err, tt.wantErr)
+				}
+				if !invoice.DueDate.Equal(before.DueDate) || invoice.PaymentTerms != before.PaymentTerms || !invoice.UpdatedAt.Equal(before.UpdatedAt) {
+					t.Fatalf("metadata changed after rejected patch: before=%+v after=%+v", before, invoice)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("UpdateMetadata() error = %v", err)
+			}
+			if invoice.DueDate.Day() != tt.wantDueDay || invoice.PaymentTerms != tt.patch.PaymentTerms {
+				t.Fatalf("updated invoice = %+v, want due day %d and payment terms %q", invoice, tt.wantDueDay, tt.patch.PaymentTerms)
+			}
+		})
+	}
+}
+
+func testInvoiceForMetadataUpdate(t *testing.T, status InvoiceStatus) Invoice {
+	t.Helper()
+	rate, err := NewMoney(10000, "USD")
+	if err != nil {
+		t.Fatalf("NewMoney(): %v", err)
+	}
+	line, err := NewManualInvoiceLine("inv_seed", "sa_123", "Development", 60, rate, "USD")
+	if err != nil {
+		t.Fatalf("NewManualInvoiceLine(): %v", err)
+	}
+	invoice, err := NewInvoice(InvoiceParams{CustomerID: "cus_123", Status: status, Currency: "USD", Lines: []InvoiceLine{line}, CreatedAt: time.Date(2026, 4, 1, 8, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatalf("NewInvoice(): %v", err)
+	}
+	return invoice
+}
+
 func TestInvoiceIssue_HappyPath(t *testing.T) {
 	t.Parallel()
 
@@ -475,5 +608,56 @@ func TestInvoiceDiscardHelpers(t *testing.T) {
 	}
 	if _, err := NewMoney(0, "USD"); err == nil {
 		t.Fatal("NewMoney() zero amount should fail")
+	}
+}
+
+func TestNewImportedInvoiceLineAndTotalUseFixedAmount(t *testing.T) {
+	t.Parallel()
+
+	line, err := NewImportedInvoiceLine(ImportInvoiceLineParams{Description: "Software development", AmountMinor: 250000, TaxMinor: 0, QuantityDisplay: "160.00", UnitPriceDisplay: "15.6250", Currency: "USD"})
+	if err != nil {
+		t.Fatalf("NewImportedInvoiceLine() error = %v", err)
+	}
+	if line.ServiceAgreementID != "" || line.TimeEntryID != "" {
+		t.Fatalf("imported line links = (%q,%q), want empty", line.ServiceAgreementID, line.TimeEntryID)
+	}
+	if line.AmountMinor != 250000 || line.QuantityDisplay != "160.00" || line.UnitPriceDisplay != "15.6250" {
+		t.Fatalf("imported line = %+v, want fixed amount and displays", line)
+	}
+	inv := Invoice{Currency: "USD", Lines: []InvoiceLine{line}}
+	if got := inv.Total(nil); got.Amount != 250000 || got.Currency != "USD" {
+		t.Fatalf("Total() = %+v, want 250000 USD", got)
+	}
+
+	_, err = NewImportedInvoiceLine(ImportInvoiceLineParams{Description: "Refund", AmountMinor: -1, Currency: "USD"})
+	if err == nil || !strings.Contains(err.Error(), "amount_minor") {
+		t.Fatalf("NewImportedInvoiceLine() error = %v, want amount_minor rejection", err)
+	}
+}
+
+func TestNewImportedInvoiceValidatesTotalsAndDates(t *testing.T) {
+	t.Parallel()
+
+	invoiceDate := time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC)
+	dueDate := time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC)
+	line, err := NewImportedInvoiceLine(ImportInvoiceLineParams{Description: "Software development", AmountMinor: 250000, Currency: "USD"})
+	if err != nil {
+		t.Fatalf("NewImportedInvoiceLine() error = %v", err)
+	}
+
+	inv, err := NewImportedInvoice(ImportInvoiceParams{CustomerID: "cus_1", InvoiceNumber: "INV/2026/00001", InvoiceDate: invoiceDate, DueDate: dueDate, Currency: "USD", PaymentTerms: "15 Days", PaymentCommunication: "INV/2026/00001", ImportSource: "manual-pdf-extract", ExternalNumber: "INV/2026/00001", ImportedAt: time.Date(2026, 4, 26, 13, 25, 34, 0, time.UTC), Lines: []InvoiceLine{line}, SubtotalMinor: 250000, TaxTotalMinor: 0, GrandTotalMinor: 250000})
+	if err != nil {
+		t.Fatalf("NewImportedInvoice() error = %v", err)
+	}
+	if inv.Status != InvoiceStatusIssued || inv.InvoiceNumber != "INV/2026/00001" || !inv.IssuedAt.Equal(invoiceDate) || !inv.CreatedAt.Equal(invoiceDate) || !inv.InvoiceDate.Equal(invoiceDate) || !inv.DueDate.Equal(dueDate) {
+		t.Fatalf("imported invoice dates/status = %+v, want issued and preserved dates", inv)
+	}
+	if inv.PaymentTerms != "15 Days" || inv.PaymentCommunication != "INV/2026/00001" || inv.ImportSource != "manual-pdf-extract" || inv.ExternalNumber != "INV/2026/00001" {
+		t.Fatalf("import metadata = %+v, want preserved fields", inv)
+	}
+
+	_, err = NewImportedInvoice(ImportInvoiceParams{CustomerID: "cus_1", InvoiceNumber: "INV/2026/00002", InvoiceDate: invoiceDate, DueDate: dueDate, Currency: "USD", Lines: []InvoiceLine{line}, SubtotalMinor: 200000, GrandTotalMinor: 200000})
+	if err == nil || !strings.Contains(err.Error(), "totals do not balance") {
+		t.Fatalf("NewImportedInvoice() error = %v, want totals do not balance", err)
 	}
 }

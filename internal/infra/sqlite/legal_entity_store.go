@@ -231,6 +231,28 @@ func (s *LegalEntityStore) GetByID(ctx context.Context, id string) (*core.LegalE
 	return &entity, nil
 }
 
+func (s *LegalEntityStore) FindByTaxID(ctx context.Context, taxID string) (*core.LegalEntity, error) {
+	return s.findOne(ctx, `SELECT id, type, legal_name, trade_name, tax_id, email, phone, website, billing_address, created_at, updated_at FROM legal_entities WHERE tax_id = ? LIMIT 1`, strings.TrimSpace(taxID))
+}
+
+func (s *LegalEntityStore) FindByLegalName(ctx context.Context, legalName string) (*core.LegalEntity, error) {
+	return s.findOne(ctx, `SELECT id, type, legal_name, trade_name, tax_id, email, phone, website, billing_address, created_at, updated_at FROM legal_entities WHERE legal_name = ? COLLATE NOCASE LIMIT 1`, strings.TrimSpace(legalName))
+}
+
+func (s *LegalEntityStore) findOne(ctx context.Context, query string, arg string) (*core.LegalEntity, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("legal entity sqlite store is required")
+	}
+	entity, err := scanLegalEntity(s.db.QueryRowContext(ctx, query, arg))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, app.ErrLegalEntityNotFound
+		}
+		return nil, err
+	}
+	return &entity, nil
+}
+
 func (s *LegalEntityStore) Delete(ctx context.Context, id string) error {
 	if s == nil || s.db == nil {
 		return errors.New("legal entity sqlite store is required")

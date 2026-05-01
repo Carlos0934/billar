@@ -80,6 +80,8 @@ The main objective is to support a reliable hourly billing flow with a clean int
 * Customer profile can have one or more service agreements
 * One service agreement has one hourly rate at a time
 * Invoice quantity is total billable hours
+* Normal billing operations are CLI/app-service first; direct SQLite edits are emergency repair-only and require explicit operator approval
+* MCP remains available, but MCP billing writes are not a trusted write surface in this posture
 
 ### Currency
 
@@ -508,8 +510,13 @@ Keep the app surface small and explicit.
 * `IssueInvoice`
 * `DiscardInvoice` — mixed semantics: draft invoices are hard-deleted (entries unlocked); issued invoices are soft-discarded (status → discarded, number permanently consumed, entries remain locked)
 * `GetInvoice`
+* `InspectInvoice`
+* `UpdateInvoiceMetadata` — non-financial metadata only; omitted/empty inputs leave existing values unchanged
 * `ListInvoices`
 * `RenderInvoicePDF`
+* `DoctorReport`
+* `SetupRuntime` — creates the resolved DB parent, export, and backup directories; never writes `.env`
+* `CreateBackup` / `ListBackups` — app service boundary for SQLite backup snapshot/list DTOs
 
 ## 8.7 Issuer Profile
 
@@ -565,9 +572,14 @@ type InvoiceService interface {
     IssueDraft(ctx context.Context, cmd IssueInvoiceCommand) (InvoiceDTO, error)
     Discard(ctx context.Context, invoiceID string) (DiscardResult, error)
     GetInvoice(ctx context.Context, invoiceID string) (InvoiceDTO, error)
+    InspectInvoice(ctx context.Context, invoiceID string) (InvoiceDTO, error)
+    UpdateInvoiceMetadata(ctx context.Context, cmd UpdateInvoiceMetadataCommand) (InvoiceDTO, error)
     ListInvoices(ctx context.Context, customerID string, statusFilter string) ([]InvoiceSummaryDTO, error)
-    // RenderPDF is deferred (not yet implemented)
-    // RenderPDF(ctx context.Context, invoiceID string) (RenderedDocumentDTO, error)
+    RenderInvoicePDF(ctx context.Context, cmd RenderInvoicePDFCommand) (RenderedFileDTO, error)
+}
+
+type DoctorService interface {
+    Report(ctx context.Context) (DoctorReportDTO, error)
 }
 
 type SessionService interface {
@@ -741,6 +753,10 @@ type AuthenticatedIdentity struct {
 ```text
 billar health
 billar status
+billar doctor
+billar setup
+billar backup create
+billar backup list
 
 billar legal-entity create
 billar legal-entity list
@@ -774,9 +790,17 @@ billar invoice draft --customer-id <customer-profile-id> [--period-start <date>]
 billar invoice issue --id <id>
 billar invoice discard --id <id>
 billar invoice show --id <id>
+billar invoice inspect --id <id>
+billar invoice update-metadata --id <id> [--invoice-date <date>] [--due-date <date>] [--payment-terms <text>] [--payment-communication <text>]
 billar invoice list --customer-id <customer-profile-id> [--status <status>]
-billar invoice pdf --id <id>
+billar invoice pdf <id> [--out <path>]
 ```
+
+`invoice inspect`, `invoice update-metadata`, `invoice pdf`, `doctor`, `setup`, `backup create`, and `backup list` support `--format text|json|toon`. `invoice pdf` uses `BILLAR_EXPORT_DIR` for omitted or relative output paths; absolute `--out` paths are written directly. If both `BILLAR_EXPORT_DIR` and `--out` are absent, the command fails with guidance instead of guessing a path.
+
+Global install is Makefile-driven: `make install` builds `./cmd/cli` to a binary literally named `billar` under `BINDIR`; `BINDIR` defaults to `go env GOBIN` and then `$(go env GOPATH)/bin`, and callers may override it with `make BINDIR=/custom/bin install`. The resulting `billar` binary is expected to run from any cwd once that directory is on `PATH`.
+
+Global setup and backup use shared application services. Runtime path resolution lives in `internal/infra/config` (`BILLAR_DB_PATH`, `BILLAR_EXPORT_DIR`, `BILLAR_BACKUP_DIR` with defaults), while `SetupService` performs idempotent 0700 directory creation and `BackupService` coordinates app-owned DTOs/seams. `billar setup` creates the DB parent, export, and backup directories without writing `.env`; `billar doctor` stays read-only and reports readiness plus `billar setup` guidance for missing paths. The SQLite backup implementation stays in `internal/infra/backup` and uses `VACUUM INTO` plus atomic rename. Backup artifacts are `.db` database snapshots with matching `.db.json` sidecar metadata; `.sqlite` backup filenames are not part of the contract. These backups contain sensitive, unencrypted billing/legal data and must be protected like the live database. `billar backup create` creates the snapshot and sidecar; `billar backup list` reports the canonical `backups` collection from sidecars and orphan `.db` files. Restore is deferred and not available in this slice because the CLI entrypoint opens/migrates the configured DB before command dispatch; a future restore flow must pre-parse before opening the live DB.
 
 ---
 
@@ -802,11 +826,12 @@ billar invoice pdf --id <id>
 * `invoice.discard`
 * `invoice.get` — implemented (returns full `InvoiceDTO` with hydrated lines)
 * `invoice.list` — implemented (returns `[]InvoiceSummaryDTO`, supports optional `status` filter)
+* `invoice.render_pdf` — available for file outputs rooted under `BILLAR_EXPORT_DIR`
 
 **Deferred (future slices — not in current MCP surface)**:
 
 * ~~`invoice.create_draft_from_unbilled`~~ — replaced by `invoice.draft` in current slice
-* ~~`invoice.render_pdf`~~ — deferred; PDF rendering not yet wired
+* trusted MCP invoice metadata writes — deferred; use CLI/app path for billing writes
 
 **Removed tools** (legal entity is always accessed via its owning profile, never directly):
 
@@ -820,6 +845,7 @@ billar invoice pdf --id <id>
 
 MCP and CLI both call application services.
 Neither should depend directly on SQLite or PDF libraries.
+Normal billing writes should be performed through CLI/application services; SQLite is reserved for explicit emergency repair and MCP writes are not trusted for billing mutations in this change.
 The HTTP MCP transport is exposed from the auth HTTP server at `/v1/mcp`.
 Authentication for MCP-capable clients is owned by the Bearer API key middleware.
 The current MCP session surface keeps only `session.status` for session inspection.

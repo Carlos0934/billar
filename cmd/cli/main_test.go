@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,6 +81,121 @@ func TestOpenConfiguredStoreReportsDBPathAndOverrideHint(t *testing.T) {
 	}
 }
 
+func TestCommandNeedsStoreAllowsSetupAndHelpBeforeDBOpen(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{{"setup"}, {"setup", "--format", "json"}, {"doctor"}, {"doctor", "--format", "json"}, {"backup", "list"}, {"backup", "create"}, {"--help"}, {"help"}} {
+		if commandNeedsStore(args) {
+			t.Fatalf("commandNeedsStore(%v) = true, want false for pre-store command", args)
+		}
+	}
+	for _, args := range [][]string{{"invoice", "list"}, {"health"}} {
+		if !commandNeedsStore(args) {
+			t.Fatalf("commandNeedsStore(%v) = false, want true", args)
+		}
+	}
+}
+
+func TestNewPreStoreCommandRunsSetupWithoutDoctorStore(t *testing.T) {
+	t.Parallel()
+
+	runtimeRoot := t.TempDir()
+	cfg := config.Config{AppName: "billar", ColorEnabled: false, DBPath: filepath.Join(runtimeRoot, "data", "billar.db"), DBPathSource: "configured", ExportDir: filepath.Join(runtimeRoot, "exports"), ExportDirSource: "configured", BackupDir: filepath.Join(runtimeRoot, "backups"), BackupDirSource: "configured"}
+	cmd := newPreStoreCommand(cfg)
+	var out bytes.Buffer
+	if err := cmd.Run(context.Background(), []string{"setup", "--format", "json"}, &out); err != nil {
+		t.Fatalf("setup Run() error = %v", err)
+	}
+	if !strings.Contains(out.String(), cfg.BackupDir) {
+		t.Fatalf("setup output = %q, want backup dir", out.String())
+	}
+}
+
+func TestNewPreStoreCommandRunsDoctorReadinessWithoutCreatingDBParent(t *testing.T) {
+	t.Parallel()
+
+	runtimeRoot := filepath.Join(t.TempDir(), "missing-runtime")
+	cfg := config.Config{AppName: "billar", ColorEnabled: false, DBPath: filepath.Join(runtimeRoot, "data", "billar.db"), DBPathSource: "configured", ExportDir: filepath.Join(runtimeRoot, "exports"), ExportDirSource: "configured", BackupDir: filepath.Join(runtimeRoot, "backups"), BackupDirSource: "configured"}
+	cmd := newPreStoreCommand(cfg)
+
+	var out bytes.Buffer
+	err := cmd.Run(context.Background(), []string{"doctor", "--format", "json"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "doctor readiness failed") {
+		t.Fatalf("doctor Run() error = %v, want readiness failure", err)
+	}
+	if _, statErr := os.Stat(filepath.Dir(cfg.DBPath)); !os.IsNotExist(statErr) {
+		t.Fatalf("db parent stat error = %v, want doctor to remain read-only", statErr)
+	}
+	if _, statErr := os.Stat(cfg.DBPath); !os.IsNotExist(statErr) {
+		t.Fatalf("db path stat error = %v, want doctor not to create or migrate SQLite", statErr)
+	}
+	if !strings.Contains(out.String(), "billar setup") || !strings.Contains(out.String(), "db_parent_dir") {
+		t.Fatalf("doctor output = %q, want setup guidance and DB parent readiness", out.String())
+	}
+}
+
+func TestNewPreStoreCommandRunsDoctorReadinessForInitializedDB(t *testing.T) {
+	t.Parallel()
+
+	runtimeRoot := t.TempDir()
+	cfg := config.Config{AppName: "billar", ColorEnabled: false, DBPath: filepath.Join(runtimeRoot, "data", "billar.db"), DBPathSource: "configured", ExportDir: filepath.Join(runtimeRoot, "exports"), ExportDirSource: "configured", BackupDir: filepath.Join(runtimeRoot, "backups"), BackupDirSource: "configured"}
+	if err := os.MkdirAll(cfg.ExportDir, 0o700); err != nil {
+		t.Fatalf("mkdir export dir: %v", err)
+	}
+	if err := os.MkdirAll(cfg.BackupDir, 0o700); err != nil {
+		t.Fatalf("mkdir backup dir: %v", err)
+	}
+	store, err := infrasqlite.Open(cfg.DBPath)
+	if err != nil {
+		t.Fatalf("initialize sqlite store: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close initialized sqlite store: %v", err)
+	}
+	before, err := os.Stat(cfg.DBPath)
+	if err != nil {
+		t.Fatalf("stat initialized db: %v", err)
+	}
+
+	cmd := newPreStoreCommand(cfg)
+	var out bytes.Buffer
+	if err := cmd.Run(context.Background(), []string{"doctor", "--format", "json"}, &out); err != nil {
+		t.Fatalf("doctor Run() error = %v, output = %q; want healthy initialized DB readiness", err, out.String())
+	}
+	var report struct {
+		DBReachable   bool `json:"db_reachable"`
+		CommandHealth []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"command_health"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal doctor output: %v; output = %q", err, out.String())
+	}
+	if !report.DBReachable || !cliCommandHealthHas(report.CommandHealth, "db", "ok") {
+		t.Fatalf("doctor report = %+v, want reachable DB and ok db command health", report)
+	}
+	after, err := os.Stat(cfg.DBPath)
+	if err != nil {
+		t.Fatalf("stat db after doctor: %v", err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) || after.Size() != before.Size() {
+		t.Fatalf("db changed after doctor: before(size=%d, mod=%s) after(size=%d, mod=%s), want read-only probe", before.Size(), before.ModTime(), after.Size(), after.ModTime())
+	}
+}
+
+func cliCommandHealthHas(values []struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}, name, status string) bool {
+	for _, value := range values {
+		if value.Name == name && value.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
 func mustOpenCLIStore(t *testing.T) *infrasqlite.Store {
 	t.Helper()
 
@@ -117,6 +233,48 @@ func TestNewCommandWiresInvoiceService(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "cus_cli_wiring") {
 		t.Fatalf("invoice draft output = %q, want customer ID payload", out.String())
+	}
+}
+
+func TestNewCommandWiresSetupBackupAndDoctorReadiness(t *testing.T) {
+	t.Parallel()
+
+	store := mustOpenCLIStore(t)
+	runtimeRoot := t.TempDir()
+	cfg := config.Config{
+		AppName:         "billar",
+		ColorEnabled:    false,
+		DBPath:          filepath.Join(runtimeRoot, "data", "billar.db"),
+		DBPathSource:    "configured",
+		ExportDir:       filepath.Join(runtimeRoot, "exports"),
+		ExportDirSource: "configured",
+		BackupDir:       filepath.Join(runtimeRoot, "backups"),
+		BackupDirSource: "configured",
+	}
+	cmd := newCommand(cfg, store)
+
+	var setupOut bytes.Buffer
+	if err := cmd.Run(context.Background(), []string{"setup", "--format", "json"}, &setupOut); err != nil {
+		t.Fatalf("setup Run() error = %v", err)
+	}
+	if !strings.Contains(setupOut.String(), cfg.BackupDir) {
+		t.Fatalf("setup output = %q, want wired backup dir", setupOut.String())
+	}
+
+	var doctorOut bytes.Buffer
+	if err := cmd.Run(context.Background(), []string{"doctor", "--format", "json"}, &doctorOut); err != nil {
+		t.Fatalf("doctor Run() error = %v", err)
+	}
+	if !strings.Contains(doctorOut.String(), "backup_dir_writable") || !strings.Contains(doctorOut.String(), "configured") {
+		t.Fatalf("doctor output = %q, want readiness fields and sources", doctorOut.String())
+	}
+
+	var backupOut bytes.Buffer
+	if err := cmd.Run(context.Background(), []string{"backup", "list", "--format", "json"}, &backupOut); err != nil {
+		t.Fatalf("backup list Run() error = %v", err)
+	}
+	if !strings.Contains(backupOut.String(), cfg.BackupDir) {
+		t.Fatalf("backup list output = %q, want wired backup dir", backupOut.String())
 	}
 }
 

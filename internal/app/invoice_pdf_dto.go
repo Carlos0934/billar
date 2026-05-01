@@ -8,8 +8,11 @@ type InvoiceDocumentDTO struct {
 	PeriodStart   string                   `json:"period_start" toon:"period_start"`
 	PeriodEnd     string                   `json:"period_end" toon:"period_end"`
 	DueDate       string                   `json:"due_date" toon:"due_date"`
+	InvoiceDate   string                   `json:"invoice_date" toon:"invoice_date"`
 	IssuedAt      string                   `json:"issued_at" toon:"issued_at"`
 	CreatedAt     string                   `json:"created_at" toon:"created_at"`
+	PaymentTerms  string                   `json:"payment_terms" toon:"payment_terms"`
+	PaymentComm   string                   `json:"payment_communication" toon:"payment_communication"`
 	Issuer        InvoiceDocumentPartyDTO  `json:"issuer" toon:"issuer"`
 	Customer      InvoiceDocumentPartyDTO  `json:"customer" toon:"customer"`
 	Lines         []InvoiceDocumentLineDTO `json:"lines" toon:"lines"`
@@ -35,6 +38,9 @@ type InvoiceDocumentLineDTO struct {
 	UnitRateCurrency  string `json:"unit_rate_currency" toon:"unit_rate_currency"`
 	LineTotalAmount   int64  `json:"line_total_amount" toon:"line_total_amount"`
 	LineTotalCurrency string `json:"line_total_currency" toon:"line_total_currency"`
+	TaxMinor          int64  `json:"tax_minor" toon:"tax_minor"`
+	UnitPriceDisplay  string `json:"unit_price_display" toon:"unit_price_display"`
+	QuantityDisplay   string `json:"quantity_display" toon:"quantity_display"`
 }
 
 type RenderedFileDTO struct {

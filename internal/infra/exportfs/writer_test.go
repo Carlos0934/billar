@@ -104,3 +104,52 @@ func TestDirectWriterWriteMissingParent(t *testing.T) {
 		t.Fatalf("Write() error = %v, want wrapped write error", err)
 	}
 }
+
+func TestFlexibleWriterResolveChoosesRootForDefaultAndRelativeOut(t *testing.T) {
+	root := t.TempDir()
+	writer := FlexibleWriter{Root: root}
+
+	for _, tc := range []struct {
+		name       string
+		filename   string
+		outputPath string
+		want       string
+	}{
+		{name: "default filename under root", filename: "invoice.pdf", want: filepath.Join(root, "invoice.pdf")},
+		{name: "relative out under root", outputPath: filepath.Join("nested", "invoice.pdf"), want: filepath.Join(root, "nested", "invoice.pdf")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := writer.Resolve(tc.filename, tc.outputPath)
+			if err != nil {
+				t.Fatalf("Resolve() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("Resolve() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFlexibleWriterResolveChoosesDirectForAbsoluteOrMissingRoot(t *testing.T) {
+	abs := filepath.Join(t.TempDir(), "invoice.pdf")
+	got, err := (FlexibleWriter{Root: t.TempDir()}).Resolve("", abs)
+	if err != nil {
+		t.Fatalf("Resolve(abs) error = %v", err)
+	}
+	if got != abs {
+		t.Fatalf("Resolve(abs) = %q, want %q", got, abs)
+	}
+
+	rel := filepath.Join("out", "invoice.pdf")
+	got, err = (FlexibleWriter{}).Resolve("", rel)
+	if err != nil {
+		t.Fatalf("Resolve(relative without root) error = %v", err)
+	}
+	want, err := filepath.Abs(rel)
+	if err != nil {
+		t.Fatalf("filepath.Abs() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("Resolve(relative without root) = %q, want direct %q", got, want)
+	}
+}

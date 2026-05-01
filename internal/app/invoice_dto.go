@@ -8,25 +8,31 @@ import (
 )
 
 type InvoiceDTO struct {
-	ID            string           `json:"id" toon:"id"`
-	InvoiceNumber string           `json:"invoice_number" toon:"invoice_number"`
-	CustomerID    string           `json:"customer_id" toon:"customer_id"`
-	Status        string           `json:"status" toon:"status"`
-	Currency      string           `json:"currency" toon:"currency"`
-	PeriodStart   string           `json:"period_start" toon:"period_start"`
-	PeriodEnd     string           `json:"period_end" toon:"period_end"`
-	DueDate       string           `json:"due_date" toon:"due_date"`
-	Notes         string           `json:"notes" toon:"notes"`
-	IsDraft       bool             `json:"is_draft" toon:"is_draft"`
-	IsIssued      bool             `json:"is_issued" toon:"is_issued"`
-	IsDiscarded   bool             `json:"is_discarded" toon:"is_discarded"`
-	Lines         []InvoiceLineDTO `json:"lines" toon:"lines"`
-	Subtotal      int64            `json:"subtotal" toon:"subtotal"`
-	GrandTotal    int64            `json:"grand_total" toon:"grand_total"`
-	IssuedAt      string           `json:"issued_at" toon:"issued_at"`
-	DiscardedAt   string           `json:"discarded_at" toon:"discarded_at"`
-	CreatedAt     string           `json:"created_at" toon:"created_at"`
-	UpdatedAt     string           `json:"updated_at" toon:"updated_at"`
+	ID                   string           `json:"id" toon:"id"`
+	InvoiceNumber        string           `json:"invoice_number" toon:"invoice_number"`
+	CustomerID           string           `json:"customer_id" toon:"customer_id"`
+	Status               string           `json:"status" toon:"status"`
+	Currency             string           `json:"currency" toon:"currency"`
+	InvoiceDate          string           `json:"invoice_date" toon:"invoice_date"`
+	PeriodStart          string           `json:"period_start" toon:"period_start"`
+	PeriodEnd            string           `json:"period_end" toon:"period_end"`
+	DueDate              string           `json:"due_date" toon:"due_date"`
+	Notes                string           `json:"notes" toon:"notes"`
+	PaymentTerms         string           `json:"payment_terms" toon:"payment_terms"`
+	PaymentCommunication string           `json:"payment_communication" toon:"payment_communication"`
+	ExternalNumber       string           `json:"external_number" toon:"external_number"`
+	ImportSource         string           `json:"import_source" toon:"import_source"`
+	ImportedAt           string           `json:"imported_at" toon:"imported_at"`
+	IsDraft              bool             `json:"is_draft" toon:"is_draft"`
+	IsIssued             bool             `json:"is_issued" toon:"is_issued"`
+	IsDiscarded          bool             `json:"is_discarded" toon:"is_discarded"`
+	Lines                []InvoiceLineDTO `json:"lines" toon:"lines"`
+	Subtotal             int64            `json:"subtotal" toon:"subtotal"`
+	GrandTotal           int64            `json:"grand_total" toon:"grand_total"`
+	IssuedAt             string           `json:"issued_at" toon:"issued_at"`
+	DiscardedAt          string           `json:"discarded_at" toon:"discarded_at"`
+	CreatedAt            string           `json:"created_at" toon:"created_at"`
+	UpdatedAt            string           `json:"updated_at" toon:"updated_at"`
 }
 
 type InvoiceLineDTO struct {
@@ -40,6 +46,10 @@ type InvoiceLineDTO struct {
 	UnitRateCurrency   string `json:"unit_rate_currency" toon:"unit_rate_currency"`
 	LineTotalAmount    int64  `json:"line_total_amount" toon:"line_total_amount"`
 	LineTotalCurrency  string `json:"line_total_currency" toon:"line_total_currency"`
+	AmountMinor        int64  `json:"amount_minor" toon:"amount_minor"`
+	TaxMinor           int64  `json:"tax_minor" toon:"tax_minor"`
+	UnitPriceDisplay   string `json:"unit_price_display" toon:"unit_price_display"`
+	QuantityDisplay    string `json:"quantity_display" toon:"quantity_display"`
 }
 
 type InvoiceSummaryDTO struct {
@@ -99,29 +109,35 @@ func invoiceToDTO(inv core.Invoice, entries []core.TimeEntry) InvoiceDTO {
 	}
 
 	dto := InvoiceDTO{
-		ID:            inv.ID,
-		InvoiceNumber: inv.InvoiceNumber,
-		CustomerID:    inv.CustomerID,
-		Status:        string(inv.Status),
-		Currency:      inv.Currency,
-		PeriodStart:   formatInvoiceTime(inv.PeriodStart),
-		PeriodEnd:     formatInvoiceTime(inv.PeriodEnd),
-		DueDate:       formatInvoiceTime(inv.DueDate),
-		Notes:         inv.Notes,
-		IsDraft:       inv.IsDraft(),
-		IsIssued:      inv.IsIssued(),
-		IsDiscarded:   inv.IsDiscarded(),
-		IssuedAt:      formatInvoiceTime(inv.IssuedAt),
-		DiscardedAt:   formatInvoiceTime(inv.DiscardedAt),
-		CreatedAt:     formatInvoiceTime(inv.CreatedAt),
-		UpdatedAt:     formatInvoiceTime(inv.UpdatedAt),
+		ID:                   inv.ID,
+		InvoiceNumber:        inv.InvoiceNumber,
+		CustomerID:           inv.CustomerID,
+		Status:               string(inv.Status),
+		Currency:             inv.Currency,
+		InvoiceDate:          formatInvoiceTime(inv.InvoiceDate),
+		PeriodStart:          formatInvoiceTime(inv.PeriodStart),
+		PeriodEnd:            formatInvoiceTime(inv.PeriodEnd),
+		DueDate:              formatInvoiceTime(inv.DueDate),
+		Notes:                inv.Notes,
+		PaymentTerms:         inv.PaymentTerms,
+		PaymentCommunication: inv.PaymentCommunication,
+		ExternalNumber:       inv.ExternalNumber,
+		ImportSource:         inv.ImportSource,
+		ImportedAt:           formatInvoiceTime(inv.ImportedAt),
+		IsDraft:              inv.IsDraft(),
+		IsIssued:             inv.IsIssued(),
+		IsDiscarded:          inv.IsDiscarded(),
+		IssuedAt:             formatInvoiceTime(inv.IssuedAt),
+		DiscardedAt:          formatInvoiceTime(inv.DiscardedAt),
+		CreatedAt:            formatInvoiceTime(inv.CreatedAt),
+		UpdatedAt:            formatInvoiceTime(inv.UpdatedAt),
 	}
 	for _, line := range inv.Lines {
 		lineDTO := invoiceLineToDTO(line, lineMap[line.TimeEntryID])
 		dto.Lines = append(dto.Lines, lineDTO)
 		dto.Subtotal += lineDTO.LineTotalAmount
+		dto.GrandTotal += lineDTO.LineTotalAmount + lineDTO.TaxMinor
 	}
-	dto.GrandTotal = dto.Subtotal
 	return dto
 }
 
@@ -134,7 +150,7 @@ func invoiceLineToDTO(line core.InvoiceLine, entry core.TimeEntry) InvoiceLineDT
 	if quantityMin == 0 {
 		quantityMin = int64(entry.Hours) * 60 / 10000
 	}
-	total := core.Money{Amount: line.UnitRate.Amount * quantityMin / 60, Currency: line.UnitRate.Currency}
+	total := line.LineTotal(entry)
 	return InvoiceLineDTO{
 		ID:                 line.ID,
 		InvoiceID:          line.InvoiceID,
@@ -146,6 +162,10 @@ func invoiceLineToDTO(line core.InvoiceLine, entry core.TimeEntry) InvoiceLineDT
 		UnitRateCurrency:   line.UnitRate.Currency,
 		LineTotalAmount:    total.Amount,
 		LineTotalCurrency:  total.Currency,
+		AmountMinor:        line.AmountMinor,
+		TaxMinor:           line.TaxMinor,
+		UnitPriceDisplay:   line.UnitPriceDisplay,
+		QuantityDisplay:    line.QuantityDisplay,
 	}
 }
 

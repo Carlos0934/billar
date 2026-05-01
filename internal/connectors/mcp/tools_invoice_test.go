@@ -34,6 +34,9 @@ type invoiceServiceStub struct {
 	removeLineArg   *app.RemoveDraftLineCommand
 	removeLineRes   app.InvoiceDTO
 	removeLineErr   error
+	importArg       *app.ImportIssuedInvoiceCommand
+	importRes       app.InvoiceDTO
+	importErr       error
 }
 
 func (s *invoiceServiceStub) CreateDraftFromUnbilled(ctx context.Context, cmd app.CreateDraftFromUnbilledCommand) (app.InvoiceDTO, error) {
@@ -80,6 +83,37 @@ func (s *invoiceServiceStub) RemoveDraftLine(ctx context.Context, cmd app.Remove
 	_ = ctx
 	s.removeLineArg = &cmd
 	return s.removeLineRes, s.removeLineErr
+}
+
+func (s *invoiceServiceStub) ImportIssued(ctx context.Context, cmd app.ImportIssuedInvoiceCommand) (app.InvoiceDTO, error) {
+	_ = ctx
+	s.importArg = &cmd
+	return s.importRes, s.importErr
+}
+
+func TestInvoiceImportToolHandler(t *testing.T) {
+	t.Parallel()
+	dto := app.InvoiceDTO{ID: "inv_imported", InvoiceNumber: "INV/2026/00001", CustomerID: "cus_1", Status: "issued", Currency: "USD", GrandTotal: 250000}
+	svc := &invoiceServiceStub{importRes: dto}
+	_, handler := invoiceImportTool(svc, nil)
+	result, err := handler(context.Background(), mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "invoice_import", Arguments: map[string]any{"payload": map[string]any{"schema": "billar.invoice.import/v1", "invoice_number": "INV/2026/00001", "invoice_date": "2026-02-02", "due_date": "2026-02-17", "currency": "USD", "customer": map[string]any{"customer_profile_id": "cus_1"}, "issuer": map[string]any{"issuer_profile_id": "iss_1"}, "lines": []any{map[string]any{"description": "Software", "amount_minor": float64(250000)}}, "totals": map[string]any{"subtotal_minor": float64(250000), "grand_total_minor": float64(250000)}}}}})
+	if err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+	if result == nil || result.IsError || result.StructuredContent == nil {
+		t.Fatalf("result = %+v, want structured success", result)
+	}
+	if svc.importArg == nil || svc.importArg.Payload.InvoiceNumber != "INV/2026/00001" || len(svc.importArg.Payload.Lines) != 1 {
+		t.Fatalf("import arg = %+v, want decoded payload", svc.importArg)
+	}
+	raw, _ := json.Marshal(result.StructuredContent)
+	var got app.InvoiceDTO
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("structured decode: %v", err)
+	}
+	if got.InvoiceNumber != dto.InvoiceNumber || got.GrandTotal != dto.GrandTotal {
+		t.Fatalf("dto = %+v, want canonical DTO", got)
+	}
 }
 
 func TestInvoiceRenderPDFToolHandler(t *testing.T) {

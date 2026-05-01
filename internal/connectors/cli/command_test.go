@@ -212,6 +212,36 @@ func TestCommandRunWritesHealthOutput(t *testing.T) {
 	}
 }
 
+func TestCommandHelpIncludesGlobalSetupBackup(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, nil, nil, nil, nil, false)
+	var out bytes.Buffer
+	if err := cmd.Run(context.Background(), []string{"--help"}, &out); err != nil {
+		t.Fatalf("Run(--help) error = %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"setup", "backup <create|list>", "doctor"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("help output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestBackupHelpListsOnlyCreateAndList(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, nil, nil, nil, nil, false)
+	var out bytes.Buffer
+	if err := cmd.Run(context.Background(), []string{"backup", "--help"}, &out); err != nil {
+		t.Fatalf("Run(backup --help) error = %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "create") || !strings.Contains(got, "list") || strings.Contains(got, "restore") {
+		t.Fatalf("backup help output = %q, want create/list only", got)
+	}
+}
+
 func TestCommandRunWritesCustomerProfileListOutput(t *testing.T) {
 	t.Parallel()
 

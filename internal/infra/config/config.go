@@ -1,17 +1,19 @@
 package config
 
 import (
-	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
 type Config struct {
-	AppName      string
-	ColorEnabled bool
-	ExportDir    string
-	DBPath       string
+	AppName         string
+	ColorEnabled    bool
+	ExportDir       string
+	ExportDirSource string
+	BackupDir       string
+	BackupDirSource string
+	DBPath          string
+	DBPathSource    string
 }
 
 func Load() (Config, error) {
@@ -27,27 +29,19 @@ func Load() (Config, error) {
 		colorEnabled = false
 	}
 
-	dbPath, err := resolveDBPath()
+	paths, err := Resolve(os.Getenv)
 	if err != nil {
 		return Config{}, err
 	}
-	if strings.TrimSpace(os.Getenv("BILLAR_DB_PATH")) == "" {
-		if err := ensureDefaultDBParentDir(dbPath); err != nil {
-			return Config{}, err
-		}
-	}
 
 	return Config{
-		AppName:      appName,
-		ColorEnabled: colorEnabled,
-		ExportDir:    strings.TrimSpace(os.Getenv("BILLAR_EXPORT_DIR")),
-		DBPath:       dbPath,
+		AppName:         appName,
+		ColorEnabled:    colorEnabled,
+		ExportDir:       paths.ExportDir.Path,
+		ExportDirSource: paths.ExportDir.Source,
+		BackupDir:       paths.BackupDir.Path,
+		BackupDirSource: paths.BackupDir.Source,
+		DBPath:          paths.DBPath.Path,
+		DBPathSource:    paths.DBPath.Source,
 	}, nil
-}
-
-func ensureDefaultDBParentDir(dbPath string) error {
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
-		return fmt.Errorf("create database directory for %q: %w; set BILLAR_DB_PATH to a writable SQLite database path", dbPath, err)
-	}
-	return nil
 }

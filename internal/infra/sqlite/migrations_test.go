@@ -332,12 +332,43 @@ func TestApplyMigrations_IdempotentReopen(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatalf("count schema_migrations: %v", err)
 	}
-	if count != 3 {
-		t.Fatalf("schema_migrations row count = %d, want 3", count)
+	if count != 4 {
+		t.Fatalf("schema_migrations row count = %d, want 4", count)
 	}
 	_, _, secondAppliedAt := migrationRow(t, db, 1)
 	if secondAppliedAt != firstAppliedAt {
 		t.Fatalf("baseline applied_at changed on reopen: got %d, want %d", secondAppliedAt, firstAppliedAt)
+	}
+}
+
+func TestApplyMigrations_AddsInvoiceImportFields(t *testing.T) {
+	t.Parallel()
+
+	db, cleanup := newTempDB(t)
+	t.Cleanup(cleanup)
+	if err := applyMigrations(db, migrationsFS); err != nil {
+		t.Fatalf("applyMigrations() error = %v", err)
+	}
+
+	invoiceColumns := invoiceColumnInfo(t, db)
+	for _, name := range []string{"invoice_date", "payment_terms", "payment_communication", "import_source", "external_number", "imported_at"} {
+		if _, ok := invoiceColumns[name]; !ok {
+			t.Fatalf("column %q missing from invoices", name)
+		}
+	}
+	lineColumns := invoiceLineColumnInfo(t, db)
+	for _, name := range []string{"amount_minor", "tax_minor", "unit_price_display", "quantity_display"} {
+		if _, ok := lineColumns[name]; !ok {
+			t.Fatalf("column %q missing from invoice_lines", name)
+		}
+	}
+	if lineColumns["service_agreement_id"].notNull {
+		t.Fatalf("service_agreement_id notnull = true, want nullable for imports")
+	}
+
+	var indexName string
+	if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'uq_invoices_invoice_number'`).Scan(&indexName); err != nil {
+		t.Fatalf("unique invoice number index missing: %v", err)
 	}
 }
 

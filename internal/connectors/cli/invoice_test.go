@@ -26,6 +26,12 @@ type stubInvoiceService struct {
 	getInvoiceID    string
 	getInvoiceRes   app.InvoiceDTO
 	getInvoiceErr   error
+	inspectID       string
+	inspectRes      app.InvoiceDTO
+	inspectErr      error
+	updateMetaArg   *app.UpdateInvoiceMetadataCommand
+	updateMetaRes   app.InvoiceDTO
+	updateMetaErr   error
 	listInvoicesRes []app.InvoiceSummaryDTO
 	listInvoicesErr error
 	pdfArg          *app.RenderInvoicePDFCommand
@@ -37,6 +43,9 @@ type stubInvoiceService struct {
 	removeLineArg   *app.RemoveDraftLineCommand
 	removeLineRes   app.InvoiceDTO
 	removeLineErr   error
+	importArg       *app.ImportIssuedInvoiceCommand
+	importRes       app.InvoiceDTO
+	importErr       error
 }
 
 func (s *stubInvoiceService) CreateDraftFromUnbilled(ctx context.Context, cmd app.CreateDraftFromUnbilledCommand) (app.InvoiceDTO, error) {
@@ -63,6 +72,18 @@ func (s *stubInvoiceService) GetInvoice(ctx context.Context, id string) (app.Inv
 	return s.getInvoiceRes, s.getInvoiceErr
 }
 
+func (s *stubInvoiceService) InspectInvoice(ctx context.Context, id string) (app.InvoiceDTO, error) {
+	_ = ctx
+	s.inspectID = id
+	return s.inspectRes, s.inspectErr
+}
+
+func (s *stubInvoiceService) UpdateInvoiceMetadata(ctx context.Context, cmd app.UpdateInvoiceMetadataCommand) (app.InvoiceDTO, error) {
+	_ = ctx
+	s.updateMetaArg = &cmd
+	return s.updateMetaRes, s.updateMetaErr
+}
+
 func (s *stubInvoiceService) ListInvoices(ctx context.Context, customerID string, statusFilter string) ([]app.InvoiceSummaryDTO, error) {
 	_ = ctx
 	return s.listInvoicesRes, s.listInvoicesErr
@@ -86,8 +107,25 @@ func (s *stubInvoiceService) RemoveDraftLine(ctx context.Context, cmd app.Remove
 	return s.removeLineRes, s.removeLineErr
 }
 
+func (s *stubInvoiceService) ImportIssued(ctx context.Context, cmd app.ImportIssuedInvoiceCommand) (app.InvoiceDTO, error) {
+	_ = ctx
+	s.importArg = &cmd
+	return s.importRes, s.importErr
+}
+
 func newTestInvoiceCommand(svc InvoiceServiceProvider) Command {
 	return NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, nil, nil, nil, svc, false)
+}
+
+func richInvoiceDTOForCLITest() app.InvoiceDTO {
+	return app.InvoiceDTO{
+		ID: "inv_001", InvoiceNumber: "INV-001", CustomerID: "cus_1", Status: "issued", Currency: "USD",
+		InvoiceDate: "2026-05-01T00:00:00Z", PeriodStart: "2026-04-01T00:00:00Z", PeriodEnd: "2026-04-30T00:00:00Z", DueDate: "2026-05-15T00:00:00Z",
+		PaymentTerms: "Net 15", PaymentCommunication: "Use INV-001", ExternalNumber: "EXT-001", ImportSource: "manual-pdf-extract", ImportedAt: "2026-05-01T12:00:00Z",
+		IssuedAt: "2026-05-01T09:00:00Z", CreatedAt: "2026-05-01T08:00:00Z", UpdatedAt: "2026-05-01T10:00:00Z",
+		Lines:    []app.InvoiceLineDTO{{ID: "inl_001", Description: "Consulting", QuantityMin: 90, UnitRateAmount: 10000, UnitRateCurrency: "USD", LineTotalAmount: 15000, LineTotalCurrency: "USD"}},
+		Subtotal: 15000, GrandTotal: 15000,
+	}
 }
 
 func TestInvoiceDraftCommand(t *testing.T) {
@@ -215,6 +253,48 @@ func TestInvoiceLineCommands(t *testing.T) {
 	}
 }
 
+func TestInvoiceImportCommandFileStdinAndFormats(t *testing.T) {
+	t.Parallel()
+
+	dto := app.InvoiceDTO{ID: "inv_imported", InvoiceNumber: "INV/2026/00001", CustomerID: "cus_1", Status: "issued", Currency: "USD", GrandTotal: 250000, Lines: []app.InvoiceLineDTO{{Description: "Software", AmountMinor: 250000, QuantityDisplay: "160.00"}}}
+	payload := `{"schema":"billar.invoice.import/v1","invoice_number":"INV/2026/00001","invoice_date":"2026-02-02","due_date":"2026-02-17","currency":"USD","customer":{"customer_profile_id":"cus_1"},"issuer":{"issuer_profile_id":"iss_1"},"lines":[{"description":"Software","quantity_display":"160.00","unit_price_display":"15.6250","amount_minor":250000}],"totals":{"subtotal_minor":250000,"tax_total_minor":0,"grand_total_minor":250000}}`
+	file := filepath.Join(t.TempDir(), "invoice.json")
+	if err := os.WriteFile(file, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+
+	t.Run("file text output", func(t *testing.T) {
+		svc := &stubInvoiceService{importRes: dto}
+		var out bytes.Buffer
+		if err := newTestInvoiceCommand(svc).Run(context.Background(), []string{"invoice", "import", "--file", file}, &out); err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+		if svc.importArg == nil || svc.importArg.Payload.InvoiceNumber != "INV/2026/00001" || len(svc.importArg.Payload.Lines) != 1 {
+			t.Fatalf("import arg = %+v, want decoded payload", svc.importArg)
+		}
+		if !strings.Contains(out.String(), "Invoice imported: inv_imported") || !strings.Contains(out.String(), "INV/2026/00001") || !strings.Contains(out.String(), "250000") {
+			t.Fatalf("output = %q, want import summary", out.String())
+		}
+	})
+
+	t.Run("stdin json output", func(t *testing.T) {
+		svc := &stubInvoiceService{importRes: dto}
+		cmd := newTestInvoiceCommand(svc)
+		cmd.stdin = strings.NewReader(payload)
+		var out bytes.Buffer
+		if err := cmd.Run(context.Background(), []string{"invoice", "import", "--stdin", "--format", "json"}, &out); err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+		var got app.InvoiceDTO
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatalf("json output: %v", err)
+		}
+		if got.InvoiceNumber != dto.InvoiceNumber || got.GrandTotal != dto.GrandTotal {
+			t.Fatalf("dto = %+v, want canonical import DTO", got)
+		}
+	})
+}
+
 func TestInvoicePDFCommandWritesConfirmationFormats(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -249,6 +329,123 @@ func TestInvoicePDFCommandWritesConfirmationFormats(t *testing.T) {
 	}
 }
 
+func TestInvoicePDFCommandAllowsDefaultExportDirWhenOutOmitted(t *testing.T) {
+	t.Parallel()
+
+	svc := &stubInvoiceService{pdfRes: app.RenderedFileDTO{InvoiceID: "inv_001", Filename: "invoice-INV-001.pdf", Path: filepath.Join(t.TempDir(), "invoice-INV-001.pdf"), MimeType: "application/pdf", SizeBytes: 9}}
+	cmd := newTestInvoiceCommand(svc)
+	cmd.exportDir = t.TempDir()
+	var out bytes.Buffer
+	if err := cmd.Run(context.Background(), []string{"invoice", "pdf", "inv_001"}, &out); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if svc.pdfArg == nil || svc.pdfArg.InvoiceID != "inv_001" || svc.pdfArg.OutputPath != "" {
+		t.Fatalf("pdf arg = %+v, want invoice id and default output path", svc.pdfArg)
+	}
+	if !strings.Contains(out.String(), "invoice-INV-001.pdf") {
+		t.Fatalf("output = %q, want default filename", out.String())
+	}
+}
+
+func TestInvoiceInspectCommandFormatsAndErrors(t *testing.T) {
+	t.Parallel()
+
+	for _, format := range []string{"text", "json", "toon"} {
+		format := format
+		t.Run(format, func(t *testing.T) {
+			t.Parallel()
+			svc := &stubInvoiceService{inspectRes: richInvoiceDTOForCLITest()}
+			var out bytes.Buffer
+			err := newTestInvoiceCommand(svc).Run(context.Background(), []string{"invoice", "inspect", "--id", "inv_001", "--format", format}, &out)
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if svc.inspectID != "inv_001" {
+				t.Fatalf("inspectID = %q, want inv_001", svc.inspectID)
+			}
+			got := out.String()
+			for _, want := range []string{"INV-001", "invoice_date", "payment_terms", "import_source", "grand_total"} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("%s output missing %q:\n%s", format, want, got)
+				}
+			}
+			if format == "json" {
+				var dto app.InvoiceDTO
+				if err := json.Unmarshal(out.Bytes(), &dto); err != nil {
+					t.Fatalf("json output invalid: %v", err)
+				}
+				if dto.InvoiceDate != "2026-05-01T00:00:00Z" || dto.ImportSource != "manual-pdf-extract" || len(dto.Lines) != 1 {
+					t.Fatalf("json dto = %+v, want canonical invoice metadata and lines", dto)
+				}
+			}
+		})
+	}
+
+	t.Run("not found exits non-zero without payload", func(t *testing.T) {
+		t.Parallel()
+		svc := &stubInvoiceService{inspectErr: app.ErrInvoiceNotFound}
+		var out bytes.Buffer
+		err := newTestInvoiceCommand(svc).Run(context.Background(), []string{"invoice", "inspect", "--id", "inv_missing", "--format", "json"}, &out)
+		if err == nil || !strings.Contains(err.Error(), "invoice not found") {
+			t.Fatalf("Run() error = %v, want invoice not found", err)
+		}
+		if out.Len() != 0 {
+			t.Fatalf("output = %q, want no partial payload", out.String())
+		}
+	})
+}
+
+func TestInvoiceUpdateMetadataCommand(t *testing.T) {
+	t.Parallel()
+
+	t.Run("success formats canonical dto and preserves imported identity", func(t *testing.T) {
+		t.Parallel()
+		svc := &stubInvoiceService{updateMetaRes: richInvoiceDTOForCLITest()}
+		var out bytes.Buffer
+		err := newTestInvoiceCommand(svc).Run(context.Background(), []string{"invoice", "update-metadata", "--id", "inv_001", "--invoice-date", "2026-05-01", "--payment-terms", "Net 15", "--payment-communication", "Use INV-001", "--format", "json"}, &out)
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+		want := app.UpdateInvoiceMetadataCommand{InvoiceID: "inv_001", InvoiceDate: "2026-05-01", PaymentTerms: "Net 15", PaymentCommunication: "Use INV-001"}
+		if svc.updateMetaArg == nil || *svc.updateMetaArg != want {
+			t.Fatalf("update metadata arg = %+v, want %+v", svc.updateMetaArg, want)
+		}
+		var dto app.InvoiceDTO
+		if err := json.Unmarshal(out.Bytes(), &dto); err != nil {
+			t.Fatalf("json output invalid: %v", err)
+		}
+		if dto.ImportSource != "manual-pdf-extract" || dto.ExternalNumber != "EXT-001" || dto.GrandTotal != 15000 || len(dto.Lines) != 1 {
+			t.Fatalf("dto = %+v, want imported identity and financial fields preserved", dto)
+		}
+	})
+
+	t.Run("date validation error writes nothing", func(t *testing.T) {
+		t.Parallel()
+		svc := &stubInvoiceService{updateMetaErr: errors.New("invoice_date must be YYYY-MM-DD or RFC3339")}
+		var out bytes.Buffer
+		err := newTestInvoiceCommand(svc).Run(context.Background(), []string{"invoice", "update-metadata", "--id", "inv_001", "--invoice-date", "not-a-date"}, &out)
+		if err == nil || !strings.Contains(err.Error(), "invoice_date") {
+			t.Fatalf("Run() error = %v, want invoice_date validation", err)
+		}
+		if out.Len() != 0 {
+			t.Fatalf("output = %q, want empty on error", out.String())
+		}
+	})
+
+	t.Run("toon output uses same canonical dto", func(t *testing.T) {
+		t.Parallel()
+		svc := &stubInvoiceService{updateMetaRes: richInvoiceDTOForCLITest()}
+		var out bytes.Buffer
+		err := newTestInvoiceCommand(svc).Run(context.Background(), []string{"invoice", "update-metadata", "--id", "inv_001", "--due-date", "2026-05-15", "--format", "toon"}, &out)
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+		if !strings.Contains(out.String(), "payment_communication") || !strings.Contains(out.String(), "import_source") || !strings.Contains(out.String(), "grand_total") {
+			t.Fatalf("toon output = %q, want canonical invoice fields", out.String())
+		}
+	})
+}
+
 func TestInvoicePDFCommandRejectsMissingArgumentsAndPropagatesErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -258,7 +455,7 @@ func TestInvoicePDFCommandRejectsMissingArgumentsAndPropagatesErrors(t *testing.
 		want string
 	}{
 		{"missing invoice id", []string{"invoice", "pdf", "--out", "x.pdf"}, &stubInvoiceService{}, "invoice id is required"},
-		{"missing out", []string{"invoice", "pdf", "inv_001"}, &stubInvoiceService{}, "--out is required"},
+		{"missing export dir and out", []string{"invoice", "pdf", "inv_001"}, &stubInvoiceService{}, "BILLAR_EXPORT_DIR"},
 		{"write error", []string{"invoice", "pdf", "inv_001", "--out", filepath.Join(t.TempDir(), "missing", "x.pdf")}, &stubInvoiceService{pdfErr: errors.New("write file: no such file or directory")}, "write file"},
 	}
 	for _, tc := range tests {
@@ -267,6 +464,9 @@ func TestInvoicePDFCommandRejectsMissingArgumentsAndPropagatesErrors(t *testing.
 			err := newTestInvoiceCommand(tc.svc).Run(context.Background(), tc.args, &out)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Run() error = %v, want %q", err, tc.want)
+			}
+			if tc.name == "missing export dir and out" && !strings.Contains(err.Error(), "--out") {
+				t.Fatalf("Run() error = %v, want --out guidance", err)
 			}
 			if out.Len() != 0 {
 				t.Fatalf("output = %q, want empty on error", out.String())

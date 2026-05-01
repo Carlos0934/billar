@@ -202,6 +202,21 @@ func (s *CustomerProfileStore) GetByID(ctx context.Context, id string) (*core.Cu
 	return &profile, nil
 }
 
+func (s *CustomerProfileStore) GetByLegalEntityID(ctx context.Context, legalEntityID string) (*core.CustomerProfile, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("customer profile sqlite store is required")
+	}
+	query := `SELECT id, legal_entity_id, status, default_currency, notes, created_at, updated_at FROM customer_profiles WHERE legal_entity_id = ? LIMIT 1`
+	profile, err := scanCustomerProfile(s.db.QueryRowContext(ctx, query, strings.TrimSpace(legalEntityID)))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, app.ErrCustomerProfileNotFound
+		}
+		return nil, fmt.Errorf("get customer profile by legal entity id: %w", err)
+	}
+	return &profile, nil
+}
+
 func (s *CustomerProfileStore) Delete(ctx context.Context, id string) error {
 	if s == nil || s.db == nil {
 		return errors.New("customer profile sqlite store is required")

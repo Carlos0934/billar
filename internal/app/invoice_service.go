@@ -14,15 +14,35 @@ var ErrNoUnbilledEntries = errors.New("no unbilled time entries")
 var ErrCustomerProfileInactive = errors.New("customer profile is inactive")
 var ErrInvoiceNotFound = errors.New("invoice not found")
 var ErrInvalidStatusFilter = errors.New("invalid invoice status filter")
+var ErrInvoiceNumberExists = errors.New("invoice number already exists")
+var ErrUnsupportedImportSchema = errors.New("unsupported import schema")
+var ErrImportTotalsMismatch = errors.New("totals do not balance")
+var ErrImportCustomerProfileNotFound = errors.New("customer profile not found for import")
 
 type InvoiceStore interface {
 	CreateDraft(ctx context.Context, invoice *core.Invoice, entries []*core.TimeEntry) error
 	GetByID(ctx context.Context, id string) (*core.Invoice, error)
 	Update(ctx context.Context, invoice *core.Invoice) error
+	UpdateMetadata(ctx context.Context, invoice *core.Invoice) error
 	Delete(ctx context.Context, id string) error
 	ListByCustomer(ctx context.Context, customerID string, status ...core.InvoiceStatus) ([]core.InvoiceSummary, error)
 	AddLine(ctx context.Context, invoiceID string, line core.InvoiceLine) error
 	RemoveLine(ctx context.Context, invoiceID, lineID string) error
+	Ping(ctx context.Context) error
+	SchemaVersion(ctx context.Context) (int, error)
+}
+
+type invoiceImporter interface {
+	ImportIssued(ctx context.Context, invoice *core.Invoice) error
+}
+
+type LegalEntityFinder interface {
+	FindByTaxID(ctx context.Context, taxID string) (*core.LegalEntity, error)
+	FindByLegalName(ctx context.Context, legalName string) (*core.LegalEntity, error)
+}
+
+type customerProfileByLegalEntityID interface {
+	GetByLegalEntityID(ctx context.Context, legalEntityID string) (*core.CustomerProfile, error)
 }
 
 type InvoiceNumberGenerator interface {
@@ -30,26 +50,30 @@ type InvoiceNumberGenerator interface {
 }
 
 type InvoiceService struct {
-	invoices   InvoiceStore
-	entries    TimeEntryStore
-	agreements ServiceAgreementStore
-	profiles   CustomerProfileStore
-	numbers    InvoiceNumberGenerator
-	issuers    DefaultIssuerProfileStore
+	invoices      InvoiceStore
+	entries       TimeEntryStore
+	agreements    ServiceAgreementStore
+	profiles      CustomerProfileStore
+	numbers       InvoiceNumberGenerator
+	issuers       DefaultIssuerProfileStore
+	legalEntities LegalEntityFinder
 }
 
 func NewInvoiceService(invoices InvoiceStore, entries TimeEntryStore, agreements ServiceAgreementStore, profiles CustomerProfileStore, optional ...any) InvoiceService {
 	var numberGen InvoiceNumberGenerator
 	var issuers DefaultIssuerProfileStore
+	var legalEntities LegalEntityFinder
 	for _, opt := range optional {
 		switch v := opt.(type) {
 		case InvoiceNumberGenerator:
 			numberGen = v
 		case DefaultIssuerProfileStore:
 			issuers = v
+		case LegalEntityFinder:
+			legalEntities = v
 		}
 	}
-	return InvoiceService{invoices: invoices, entries: entries, agreements: agreements, profiles: profiles, numbers: numberGen, issuers: issuers}
+	return InvoiceService{invoices: invoices, entries: entries, agreements: agreements, profiles: profiles, numbers: numberGen, issuers: issuers, legalEntities: legalEntities}
 }
 
 func (s InvoiceService) CreateDraftFromUnbilled(ctx context.Context, cmd CreateDraftFromUnbilledCommand) (InvoiceDTO, error) {
@@ -214,6 +238,48 @@ func (s InvoiceService) GetInvoice(ctx context.Context, id string) (InvoiceDTO, 
 	}
 
 	return invoiceToDTO(*inv, entries), nil
+}
+
+func (s InvoiceService) InspectInvoice(ctx context.Context, id string) (InvoiceDTO, error) {
+	return s.GetInvoice(ctx, id)
+}
+
+func (s InvoiceService) UpdateInvoiceMetadata(ctx context.Context, cmd UpdateInvoiceMetadataCommand) (InvoiceDTO, error) {
+	if strings.TrimSpace(cmd.InvoiceID) == "" {
+		return InvoiceDTO{}, errors.New("invoice id is required")
+	}
+	if s.invoices == nil {
+		return InvoiceDTO{}, errors.New("invoice service dependencies are required")
+	}
+
+	invoiceDate, err := parseInvoiceCommandDate(cmd.InvoiceDate, "invoice_date")
+	if err != nil {
+		return InvoiceDTO{}, fmt.Errorf("update invoice metadata: %w", err)
+	}
+	dueDate, err := parseInvoiceCommandDate(cmd.DueDate, "due_date")
+	if err != nil {
+		return InvoiceDTO{}, fmt.Errorf("update invoice metadata: %w", err)
+	}
+
+	invoice, err := s.getInvoice(ctx, cmd.InvoiceID)
+	if err != nil {
+		return InvoiceDTO{}, fmt.Errorf("update invoice metadata: %w", err)
+	}
+	if invoice == nil {
+		return InvoiceDTO{}, errors.New("update invoice metadata: invoice is required")
+	}
+	if err := invoice.UpdateMetadata(core.InvoiceMetadataPatch{
+		InvoiceDate:          invoiceDate,
+		DueDate:              dueDate,
+		PaymentTerms:         cmd.PaymentTerms,
+		PaymentCommunication: cmd.PaymentCommunication,
+	}); err != nil {
+		return InvoiceDTO{}, fmt.Errorf("update invoice metadata: %w", err)
+	}
+	if err := s.invoices.UpdateMetadata(ctx, invoice); err != nil {
+		return InvoiceDTO{}, fmt.Errorf("update invoice metadata: save metadata: %w", err)
+	}
+	return invoiceToDTO(*invoice, nil), nil
 }
 
 func (s InvoiceService) AddDraftLine(ctx context.Context, cmd AddDraftLineCommand) (InvoiceDTO, error) {

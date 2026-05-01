@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -21,12 +22,17 @@ type InvoiceServiceProvider interface {
 	RenderInvoicePDF(ctx context.Context, cmd app.RenderInvoicePDFCommand) (app.RenderedFileDTO, error)
 	AddDraftLine(ctx context.Context, cmd app.AddDraftLineCommand) (app.InvoiceDTO, error)
 	RemoveDraftLine(ctx context.Context, cmd app.RemoveDraftLineCommand) (app.InvoiceDTO, error)
+	ImportIssued(ctx context.Context, cmd app.ImportIssuedInvoiceCommand) (app.InvoiceDTO, error)
 }
 
 func registerInvoiceTools(server *mcpsrv.MCPServer, service InvoiceServiceProvider, logger *slog.Logger) []string {
-	registered := make([]string, 0, 8)
+	registered := make([]string, 0, 9)
 
-	tool, handler := invoiceDraftTool(service, logger)
+	tool, handler := invoiceImportTool(service, logger)
+	server.AddTool(tool, handler)
+	registered = append(registered, tool.Name)
+
+	tool, handler = invoiceDraftTool(service, logger)
 	server.AddTool(tool, handler)
 	registered = append(registered, tool.Name)
 
@@ -59,6 +65,36 @@ func registerInvoiceTools(server *mcpsrv.MCPServer, service InvoiceServiceProvid
 	registered = append(registered, tool.Name)
 
 	return registered
+}
+
+func invoiceImportTool(service InvoiceServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+	tool := mcp.NewTool("invoice_import",
+		mcp.WithDescription("Import a historical issued invoice from billar.invoice.import/v1 JSON payload"),
+		mcp.WithObject("payload", mcp.Required(), mcp.Description("JSON import payload")),
+	)
+	return tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if service == nil {
+			return mcp.NewToolResultError("invoice service is required"), nil
+		}
+		args, _ := req.Params.Arguments.(map[string]any)
+		rawPayload, ok := args["payload"]
+		if !ok || rawPayload == nil {
+			return mcp.NewToolResultError("payload argument is required"), nil
+		}
+		data, err := json.Marshal(rawPayload)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		var payload app.ImportPayload
+		if err := json.Unmarshal(data, &payload); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		result, err := service.ImportIssued(ctx, app.ImportIssuedInvoiceCommand{Payload: payload})
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultStructured(result, invoiceImportText(result)), nil
+	}
 }
 
 func invoiceLineAddTool(service InvoiceServiceProvider, logger *slog.Logger) (mcp.Tool, func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
@@ -251,6 +287,10 @@ func invoiceIssueText(inv app.InvoiceDTO) string {
 	b.WriteString(fmt.Sprintf("Invoice issued: %s\n", inv.ID))
 	b.WriteString(invoiceTextFields(inv))
 	return b.String()
+}
+
+func invoiceImportText(inv app.InvoiceDTO) string {
+	return fmt.Sprintf("Invoice imported: %s\n%sGrand Total: %d\n", inv.ID, invoiceTextFields(inv), inv.GrandTotal)
 }
 
 func invoiceLineAddText(inv app.InvoiceDTO) string {

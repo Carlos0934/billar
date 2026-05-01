@@ -37,7 +37,7 @@ func newServer(authCfg config.AuthConfig, appCfg config.Config, store *infrasqli
 	customerProfileService := app.NewCustomerProfileService(legalEntityStore, customerProfileStore)
 	agreementService := app.NewAgreementService(agreementStore, customerProfileStore)
 	timeEntryService := app.NewTimeEntryService(timeEntryStore, customerProfileStore, agreementStore)
-	invoiceService := app.NewInvoiceService(invoiceStore, timeEntryStore, agreementStore, customerProfileStore, invoiceSequenceStore, issuerProfileStore)
+	invoiceService := app.NewInvoiceService(invoiceStore, timeEntryStore, agreementStore, customerProfileStore, invoiceSequenceStore, issuerProfileStore, legalEntityStore)
 	invoicePDFService := app.NewInvoicePDFService(invoiceStore, timeEntryStore, customerProfileStore, issuerProfileStore, legalEntityStore, pdf.Renderer{}, exportfs.RootedWriter{Root: appCfg.ExportDir})
 	invoiceProvider := app.NewInvoiceProvider(invoiceService, invoicePDFService)
 

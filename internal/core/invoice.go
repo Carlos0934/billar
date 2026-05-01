@@ -38,6 +38,47 @@ type InvoiceLine struct {
 	Description        string
 	QuantityMin        int64
 	UnitRate           Money
+	AmountMinor        int64
+	TaxMinor           int64
+	UnitPriceDisplay   string
+	QuantityDisplay    string
+}
+
+type ImportInvoiceLineParams struct {
+	Description      string
+	AmountMinor      int64
+	TaxMinor         int64
+	QuantityDisplay  string
+	UnitPriceDisplay string
+	Currency         string
+}
+
+func NewImportedInvoiceLine(params ImportInvoiceLineParams) (InvoiceLine, error) {
+	if strings.TrimSpace(params.Description) == "" {
+		return InvoiceLine{}, errors.New("invoice line description is required")
+	}
+	if params.AmountMinor < 0 {
+		return InvoiceLine{}, errors.New("invoice line amount_minor must be non-negative")
+	}
+	if params.TaxMinor < 0 {
+		return InvoiceLine{}, errors.New("invoice line tax_minor must be non-negative")
+	}
+	if strings.TrimSpace(params.Currency) == "" {
+		return InvoiceLine{}, errors.New("invoice line currency is required")
+	}
+	line := InvoiceLine{
+		ID:               generateInvoiceLineID(),
+		Description:      strings.TrimSpace(params.Description),
+		UnitRate:         Money{Currency: strings.TrimSpace(params.Currency)},
+		AmountMinor:      params.AmountMinor,
+		TaxMinor:         params.TaxMinor,
+		UnitPriceDisplay: strings.TrimSpace(params.UnitPriceDisplay),
+		QuantityDisplay:  strings.TrimSpace(params.QuantityDisplay),
+	}
+	if line.ID == "" {
+		return InvoiceLine{}, errors.New("failed to generate invoice line id")
+	}
+	return line, nil
 }
 
 type InvoiceLineParams struct {
@@ -118,6 +159,9 @@ func NewManualInvoiceLine(invoiceID, serviceAgreementID, description string, qua
 }
 
 func (l InvoiceLine) LineTotal(entries ...TimeEntry) Money {
+	if l.AmountMinor != 0 || (l.TimeEntryID == "" && l.ServiceAgreementID == "" && l.UnitRate.Amount == 0) {
+		return Money{Amount: l.AmountMinor, Currency: l.UnitRate.Currency}
+	}
 	quantityMin := l.QuantityMin
 	if quantityMin == 0 && len(entries) > 0 {
 		quantityMin = int64(entries[0].Hours) * 60 / minutesPerHour
@@ -126,20 +170,97 @@ func (l InvoiceLine) LineTotal(entries ...TimeEntry) Money {
 }
 
 type Invoice struct {
-	ID            string
-	InvoiceNumber string
-	CustomerID    string
-	Status        InvoiceStatus
-	Currency      string
-	Lines         []InvoiceLine
-	PeriodStart   time.Time
-	PeriodEnd     time.Time
-	DueDate       time.Time
-	Notes         string
-	IssuedAt      time.Time
-	DiscardedAt   time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID                   string
+	InvoiceNumber        string
+	CustomerID           string
+	Status               InvoiceStatus
+	Currency             string
+	Lines                []InvoiceLine
+	InvoiceDate          time.Time
+	PeriodStart          time.Time
+	PeriodEnd            time.Time
+	DueDate              time.Time
+	Notes                string
+	PaymentTerms         string
+	PaymentCommunication string
+	ImportSource         string
+	ExternalNumber       string
+	ImportedAt           time.Time
+	IssuedAt             time.Time
+	DiscardedAt          time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+type ImportInvoiceParams struct {
+	CustomerID           string
+	InvoiceNumber        string
+	InvoiceDate          time.Time
+	DueDate              time.Time
+	Currency             string
+	PaymentTerms         string
+	PaymentCommunication string
+	ImportSource         string
+	ExternalNumber       string
+	ImportedAt           time.Time
+	Lines                []InvoiceLine
+	SubtotalMinor        int64
+	TaxTotalMinor        int64
+	GrandTotalMinor      int64
+}
+
+func NewImportedInvoice(params ImportInvoiceParams) (Invoice, error) {
+	if strings.TrimSpace(params.CustomerID) == "" {
+		return Invoice{}, errors.New("invoice customer id is required")
+	}
+	if strings.TrimSpace(params.InvoiceNumber) == "" {
+		return Invoice{}, errors.New("invoice number is required")
+	}
+	if params.InvoiceDate.IsZero() {
+		return Invoice{}, errors.New("invoice_date is required")
+	}
+	if params.DueDate.IsZero() {
+		return Invoice{}, errors.New("due_date is required")
+	}
+	if params.DueDate.Before(params.InvoiceDate) {
+		return Invoice{}, errors.New("due_date must be on or after invoice_date")
+	}
+	if strings.TrimSpace(params.Currency) == "" {
+		return Invoice{}, errors.New("invoice currency is required")
+	}
+	if len(params.Lines) == 0 {
+		return Invoice{}, errors.New("invoice must have at least one line")
+	}
+	if params.GrandTotalMinor <= 0 {
+		return Invoice{}, errors.New("grand_total_minor must be positive")
+	}
+	var subtotal, taxTotal int64
+	for _, line := range params.Lines {
+		if line.AmountMinor < 0 || line.TaxMinor < 0 {
+			return Invoice{}, errors.New("invoice line amounts must be non-negative")
+		}
+		if line.UnitRate.Currency != strings.TrimSpace(params.Currency) {
+			return Invoice{}, fmt.Errorf("invoice line currency %q must match invoice currency %q", line.UnitRate.Currency, strings.TrimSpace(params.Currency))
+		}
+		subtotal += line.AmountMinor
+		taxTotal += line.TaxMinor
+	}
+	if subtotal != params.SubtotalMinor || taxTotal != params.TaxTotalMinor || subtotal+taxTotal != params.GrandTotalMinor {
+		return Invoice{}, errors.New("totals do not balance")
+	}
+	now := params.ImportedAt.UTC()
+	if now.IsZero() {
+		now = params.InvoiceDate.UTC()
+	}
+	inv := Invoice{ID: generateInvoiceID(), InvoiceNumber: strings.TrimSpace(params.InvoiceNumber), CustomerID: strings.TrimSpace(params.CustomerID), Status: InvoiceStatusIssued, Currency: strings.TrimSpace(params.Currency), Lines: make([]InvoiceLine, len(params.Lines)), InvoiceDate: params.InvoiceDate.UTC(), PeriodStart: params.InvoiceDate.UTC(), PeriodEnd: params.InvoiceDate.UTC(), DueDate: params.DueDate.UTC(), PaymentTerms: strings.TrimSpace(params.PaymentTerms), PaymentCommunication: strings.TrimSpace(params.PaymentCommunication), ImportSource: strings.TrimSpace(params.ImportSource), ExternalNumber: strings.TrimSpace(params.ExternalNumber), ImportedAt: now, IssuedAt: params.InvoiceDate.UTC(), CreatedAt: params.InvoiceDate.UTC(), UpdatedAt: params.InvoiceDate.UTC()}
+	if inv.ID == "" {
+		return Invoice{}, errors.New("failed to generate invoice id")
+	}
+	for i, line := range params.Lines {
+		line.InvoiceID = inv.ID
+		inv.Lines[i] = line
+	}
+	return inv, nil
 }
 
 type InvoiceParams struct {
@@ -152,6 +273,17 @@ type InvoiceParams struct {
 	DueDate     time.Time
 	Notes       string
 	CreatedAt   time.Time
+}
+
+type InvoiceMetadataPatch struct {
+	InvoiceDate          time.Time
+	PeriodStart          time.Time
+	PeriodEnd            time.Time
+	DueDate              time.Time
+	PaymentTerms         string
+	PaymentCommunication string
+	Notes                string
+	ExternalNumber       string
 }
 
 func NewInvoice(params InvoiceParams) (Invoice, error) {
@@ -227,6 +359,61 @@ func (i Invoice) IsDraft() bool { return i.Status == InvoiceStatusDraft }
 func (i Invoice) IsIssued() bool { return i.Status == InvoiceStatusIssued }
 
 func (i Invoice) IsDiscarded() bool { return i.Status == InvoiceStatusDiscarded }
+
+func (i *Invoice) UpdateMetadata(patch InvoiceMetadataPatch) error {
+	if i == nil {
+		return errors.New("invoice is required")
+	}
+	if i.IsDiscarded() {
+		return errors.New("discarded invoices cannot be updated")
+	}
+	if !i.IsDraft() && !i.IsIssued() {
+		return errors.New("invoice status is invalid")
+	}
+
+	updated := *i
+	if !patch.InvoiceDate.IsZero() {
+		updated.InvoiceDate = patch.InvoiceDate.UTC()
+	}
+	if !patch.PeriodStart.IsZero() {
+		updated.PeriodStart = patch.PeriodStart.UTC()
+	}
+	if !patch.PeriodEnd.IsZero() {
+		updated.PeriodEnd = patch.PeriodEnd.UTC()
+	}
+	if !patch.DueDate.IsZero() {
+		updated.DueDate = patch.DueDate.UTC()
+	}
+	if patch.PaymentTerms != "" {
+		updated.PaymentTerms = strings.TrimSpace(patch.PaymentTerms)
+	}
+	if patch.PaymentCommunication != "" {
+		updated.PaymentCommunication = strings.TrimSpace(patch.PaymentCommunication)
+	}
+	if patch.Notes != "" {
+		updated.Notes = patch.Notes
+	}
+	if patch.ExternalNumber != "" {
+		updated.ExternalNumber = strings.TrimSpace(patch.ExternalNumber)
+	}
+
+	if !updated.PeriodStart.IsZero() && !updated.PeriodEnd.IsZero() && updated.PeriodEnd.Before(updated.PeriodStart) {
+		return errors.New("period_end must be on or after period_start")
+	}
+	if !updated.DueDate.IsZero() && !updated.PeriodEnd.IsZero() && updated.DueDate.Before(updated.PeriodEnd) {
+		return errors.New("due_date must be on or after period_end")
+	}
+	if !updated.DueDate.IsZero() && updated.PeriodEnd.IsZero() && !updated.PeriodStart.IsZero() && updated.DueDate.Before(updated.PeriodStart) {
+		return errors.New("due_date must be on or after period_start")
+	}
+	if len(updated.Notes) > 4000 {
+		return errors.New("invoice notes must be 4000 characters or fewer")
+	}
+
+	updated.UpdatedAt = time.Now().UTC()
+	*i = updated
+	return nil
+}
 
 func (i *Invoice) AddLine(line InvoiceLine) error {
 	if i == nil {
@@ -309,6 +496,10 @@ func (i Invoice) Total(entries []TimeEntry) Money {
 		entryByID[entry.ID] = entry
 	}
 	for _, line := range i.Lines {
+		if line.AmountMinor != 0 || (line.TimeEntryID == "" && line.ServiceAgreementID == "" && line.UnitRate.Amount == 0) {
+			total.Amount += line.LineTotal().Amount
+			continue
+		}
 		if line.QuantityMin == 0 {
 			entry, ok := entryByID[line.TimeEntryID]
 			if !ok {

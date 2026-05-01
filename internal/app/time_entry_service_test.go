@@ -71,6 +71,13 @@ func (s *customerProfileStoreForTimeEntry) GetByID(ctx context.Context, id strin
 	_ = ctx
 	return s.getByIDRes, s.getByIDErr
 }
+func (s *customerProfileStoreForTimeEntry) GetByLegalEntityID(ctx context.Context, legalEntityID string) (*core.CustomerProfile, error) {
+	_ = ctx
+	if s.getByIDRes != nil && s.getByIDRes.LegalEntityID == legalEntityID {
+		return s.getByIDRes, s.getByIDErr
+	}
+	return nil, ErrCustomerProfileNotFound
+}
 func (s *customerProfileStoreForTimeEntry) Delete(ctx context.Context, id string) error {
 	return nil
 }

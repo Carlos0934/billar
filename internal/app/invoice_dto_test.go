@@ -1,6 +1,7 @@
 package app
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -66,5 +67,62 @@ func TestInvoiceToDTO_MapsHeaderAndLines(t *testing.T) {
 	}
 	if dto.Lines[0].TimeEntryID != entry.ID {
 		t.Fatalf("TimeEntryID = %q, want %q", dto.Lines[0].TimeEntryID, entry.ID)
+	}
+}
+
+func TestInvoiceToDTO_MapsOperationalMetadata(t *testing.T) {
+	t.Parallel()
+
+	line := core.InvoiceLine{ID: "inl_123", InvoiceID: "inv_123", Description: "Imported work", UnitRate: core.Money{Currency: "USD"}, AmountMinor: 250000}
+	invoice := core.Invoice{
+		ID:                   "inv_123",
+		InvoiceNumber:        "INV-2026-0001",
+		CustomerID:           "cus_123",
+		Status:               core.InvoiceStatusIssued,
+		Currency:             "USD",
+		Lines:                []core.InvoiceLine{line},
+		InvoiceDate:          time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+		PeriodStart:          time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:            time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC),
+		DueDate:              time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC),
+		PaymentTerms:         "Net 15",
+		PaymentCommunication: "Use invoice INV-2026-0001",
+		ExternalNumber:       "EXT-001",
+		ImportSource:         "manual-pdf-extract",
+		ImportedAt:           time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC),
+	}
+
+	dto := invoiceToDTO(invoice, nil)
+	if dto.InvoiceDate != "2026-05-01T00:00:00Z" || dto.PaymentTerms != "Net 15" || dto.PaymentCommunication != "Use invoice INV-2026-0001" {
+		t.Fatalf("dto operational metadata = (%q,%q,%q), want invoice date and payment metadata", dto.InvoiceDate, dto.PaymentTerms, dto.PaymentCommunication)
+	}
+	if dto.ExternalNumber != "EXT-001" || dto.ImportSource != "manual-pdf-extract" || dto.ImportedAt != "2026-05-01T12:00:00Z" {
+		t.Fatalf("dto import metadata = (%q,%q,%q), want imported identity", dto.ExternalNumber, dto.ImportSource, dto.ImportedAt)
+	}
+}
+
+func TestInvoiceDTOOperationalMetadataTags(t *testing.T) {
+	t.Parallel()
+
+	typ := reflect.TypeOf(InvoiceDTO{})
+	fields := map[string]string{
+		"InvoiceDate":          "invoice_date",
+		"PaymentTerms":         "payment_terms",
+		"PaymentCommunication": "payment_communication",
+		"ExternalNumber":       "external_number",
+		"ImportSource":         "import_source",
+		"ImportedAt":           "imported_at",
+	}
+	for fieldName, tagName := range fields {
+		field, ok := typ.FieldByName(fieldName)
+		if !ok {
+			t.Fatalf("InvoiceDTO missing field %s", fieldName)
+		}
+		if got := field.Tag.Get("json"); got != tagName {
+			t.Fatalf("%s json tag = %q, want %q", fieldName, got, tagName)
+		}
+		if got := field.Tag.Get("toon"); got != tagName {
+			t.Fatalf("%s toon tag = %q, want %q", fieldName, got, tagName)
+		}
 	}
 }

@@ -2,10 +2,12 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/Carlos0934/billar/internal/app"
@@ -17,15 +19,18 @@ type InvoiceServiceProvider interface {
 	IssueDraft(ctx context.Context, cmd app.IssueInvoiceCommand) (app.InvoiceDTO, error)
 	Discard(ctx context.Context, id string) (app.DiscardResult, error)
 	GetInvoice(ctx context.Context, id string) (app.InvoiceDTO, error)
+	InspectInvoice(ctx context.Context, id string) (app.InvoiceDTO, error)
+	UpdateInvoiceMetadata(ctx context.Context, cmd app.UpdateInvoiceMetadataCommand) (app.InvoiceDTO, error)
 	ListInvoices(ctx context.Context, customerID string, statusFilter string) ([]app.InvoiceSummaryDTO, error)
 	RenderInvoicePDF(ctx context.Context, cmd app.RenderInvoicePDFCommand) (app.RenderedFileDTO, error)
 	AddDraftLine(ctx context.Context, cmd app.AddDraftLineCommand) (app.InvoiceDTO, error)
 	RemoveDraftLine(ctx context.Context, cmd app.RemoveDraftLineCommand) (app.InvoiceDTO, error)
+	ImportIssued(ctx context.Context, cmd app.ImportIssuedInvoiceCommand) (app.InvoiceDTO, error)
 }
 
 func (c Command) runInvoice(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: billar invoice <draft|issue|discard|show|list|pdf|line> [flags]")
+		return errors.New("usage: billar invoice <draft|issue|discard|show|inspect|update-metadata|list|pdf|line|import> [flags]")
 	}
 
 	subcommand := strings.ToLower(args[0])
@@ -42,15 +47,33 @@ func (c Command) runInvoice(ctx context.Context, args []string, out io.Writer) e
 		return c.runInvoiceDiscard(ctx, args[1:], out)
 	case "show":
 		return c.runInvoiceShow(ctx, args[1:], out)
+	case "inspect":
+		return c.runInvoiceInspect(ctx, args[1:], out)
+	case "update-metadata":
+		return c.runInvoiceUpdateMetadata(ctx, args[1:], out)
 	case "list":
 		return c.runInvoiceList(ctx, args[1:], out)
 	case "pdf":
 		return c.runInvoicePDF(ctx, args[1:], out)
 	case "line":
 		return c.runInvoiceLine(ctx, args[1:], out)
+	case "import":
+		return c.runInvoiceImport(ctx, args[1:], out)
 	default:
 		return fmt.Errorf("unknown command %q", strings.Join([]string{"invoice", args[0]}, " "))
 	}
+}
+
+func (c Command) runInvoiceImport(ctx context.Context, args []string, out io.Writer) error {
+	cmd, format, err := c.parseInvoiceImportFlags(args)
+	if err != nil {
+		return err
+	}
+	result, err := c.invoice.ImportIssued(ctx, cmd)
+	if err != nil {
+		return fmt.Errorf("run invoice import command: %w", err)
+	}
+	return WriteOutput(out, format, OutputResult{Payload: result, TextWriter: func(w io.Writer) error { return writeInvoiceImportText(w, result, c.colorEnabled) }})
 }
 
 func (c Command) runInvoiceLine(ctx context.Context, args []string, out io.Writer) error {
@@ -87,6 +110,9 @@ func (c Command) runInvoicePDF(ctx context.Context, args []string, out io.Writer
 	cmd, format, err := parseInvoicePDFFlags(args)
 	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(cmd.OutputPath) == "" && strings.TrimSpace(c.exportDir) == "" {
+		return errors.New("invoice pdf requires BILLAR_EXPORT_DIR when --out is omitted; set BILLAR_EXPORT_DIR or pass --out <path>")
 	}
 	result, err := c.invoice.RenderInvoicePDF(ctx, cmd)
 	if err != nil {
@@ -212,6 +238,48 @@ func parseInvoiceDraftFlags(args []string) (app.CreateDraftFromUnbilledCommand, 
 	return app.CreateDraftFromUnbilledCommand{CustomerProfileID: customerID, PeriodStart: periodStart, PeriodEnd: periodEnd, DueDate: dueDate, Notes: notes}, format, nil
 }
 
+func (c Command) parseInvoiceImportFlags(args []string) (app.ImportIssuedInvoiceCommand, Format, error) {
+	flags := flag.NewFlagSet("invoice import", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	var filePath string
+	var useStdin bool
+	var formatValue string
+	flags.StringVar(&filePath, "file", "", "JSON import file")
+	flags.BoolVar(&useStdin, "stdin", false, "read JSON import payload from stdin")
+	flags.StringVar(&formatValue, "format", string(FormatText), "output format")
+	if err := flags.Parse(args); err != nil {
+		return app.ImportIssuedInvoiceCommand{}, "", fmt.Errorf("invoice import: %w", err)
+	}
+	if flags.NArg() != 0 {
+		return app.ImportIssuedInvoiceCommand{}, "", errors.New("usage: billar invoice import --file <path> [--format text|json|toon]")
+	}
+	if (strings.TrimSpace(filePath) == "") == !useStdin {
+		return app.ImportIssuedInvoiceCommand{}, "", errors.New("exactly one of --file or --stdin is required")
+	}
+	format, err := ParseFormat(formatValue)
+	if err != nil {
+		return app.ImportIssuedInvoiceCommand{}, "", err
+	}
+	var data []byte
+	if useStdin {
+		reader := c.stdin
+		if reader == nil {
+			reader = os.Stdin
+		}
+		data, err = io.ReadAll(reader)
+	} else {
+		data, err = os.ReadFile(strings.TrimSpace(filePath))
+	}
+	if err != nil {
+		return app.ImportIssuedInvoiceCommand{}, "", fmt.Errorf("read invoice import payload: %w", err)
+	}
+	var payload app.ImportPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return app.ImportIssuedInvoiceCommand{}, "", fmt.Errorf("decode invoice import payload: %w", err)
+	}
+	return app.ImportIssuedInvoiceCommand{Payload: payload}, format, nil
+}
+
 func parseInvoiceIDFlags(name string, args []string) (string, Format, error) {
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -272,14 +340,37 @@ func parseInvoicePDFFlags(args []string) (app.RenderInvoicePDFCommand, Format, e
 	if strings.TrimSpace(invoiceID) == "" {
 		return app.RenderInvoicePDFCommand{}, "", errors.New("invoice id is required")
 	}
-	if strings.TrimSpace(outPath) == "" {
-		return app.RenderInvoicePDFCommand{}, "", errors.New("--out is required")
-	}
 	format, err := ParseFormat(formatValue)
 	if err != nil {
 		return app.RenderInvoicePDFCommand{}, "", err
 	}
 	return app.RenderInvoicePDFCommand{InvoiceID: strings.TrimSpace(invoiceID), OutputPath: strings.TrimSpace(outPath)}, format, nil
+}
+
+func parseInvoiceMetadataFlags(args []string) (app.UpdateInvoiceMetadataCommand, Format, error) {
+	flags := flag.NewFlagSet("invoice update-metadata", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	var id, invoiceDate, dueDate, paymentTerms, paymentCommunication, formatValue string
+	flags.StringVar(&id, "id", "", "invoice ID")
+	flags.StringVar(&invoiceDate, "invoice-date", "", "invoice date (YYYY-MM-DD or RFC3339)")
+	flags.StringVar(&dueDate, "due-date", "", "due date (YYYY-MM-DD or RFC3339)")
+	flags.StringVar(&paymentTerms, "payment-terms", "", "payment terms")
+	flags.StringVar(&paymentCommunication, "payment-communication", "", "payment communication")
+	flags.StringVar(&formatValue, "format", string(FormatText), "output format")
+	if err := flags.Parse(args); err != nil {
+		return app.UpdateInvoiceMetadataCommand{}, "", fmt.Errorf("invoice update-metadata: %w", err)
+	}
+	if flags.NArg() != 0 {
+		return app.UpdateInvoiceMetadataCommand{}, "", errors.New("usage: billar invoice update-metadata --id <invoice-id> [--invoice-date <date>] [--due-date <date>] [--payment-terms <text>] [--payment-communication <text>]")
+	}
+	if strings.TrimSpace(id) == "" {
+		return app.UpdateInvoiceMetadataCommand{}, "", errors.New("--id is required")
+	}
+	format, err := ParseFormat(formatValue)
+	if err != nil {
+		return app.UpdateInvoiceMetadataCommand{}, "", err
+	}
+	return app.UpdateInvoiceMetadataCommand{InvoiceID: strings.TrimSpace(id), InvoiceDate: strings.TrimSpace(invoiceDate), DueDate: strings.TrimSpace(dueDate), PaymentTerms: strings.TrimSpace(paymentTerms), PaymentCommunication: strings.TrimSpace(paymentCommunication)}, format, nil
 }
 
 func parseInvoiceLineAddFlags(args []string) (app.AddDraftLineCommand, Format, error) {
@@ -385,6 +476,19 @@ func writeInvoiceLineRemoveText(out io.Writer, inv app.InvoiceDTO, colorEnabled 
 	return writeInvoiceText(out, inv, colorEnabled)
 }
 
+func writeInvoiceImportText(out io.Writer, inv app.InvoiceDTO, colorEnabled bool) error {
+	view := newTextView(out, colorEnabled)
+	view.Line(fmt.Sprintf("Invoice imported: %s", inv.ID))
+	if inv.InvoiceNumber != "" {
+		view.Field("Number", inv.InvoiceNumber)
+	}
+	view.Field("Status", inv.Status)
+	view.Field("Currency", inv.Currency)
+	view.Field("Grand Total", fmt.Sprintf("%d", inv.GrandTotal))
+	_, err := io.WriteString(out, view.Build())
+	return err
+}
+
 func writeInvoiceDiscardText(out io.Writer, id string, result app.DiscardResult, colorEnabled bool) error {
 	view := newTextView(out, colorEnabled)
 	if result.WasSoftDiscard {
@@ -460,6 +564,38 @@ func (c Command) runInvoiceShow(ctx context.Context, args []string, out io.Write
 
 	if err := WriteOutput(out, format, output); err != nil {
 		return fmt.Errorf("write invoice show output: %w", err)
+	}
+	return nil
+}
+
+func (c Command) runInvoiceInspect(ctx context.Context, args []string, out io.Writer) error {
+	id, format, err := parseInvoiceIDFlags("invoice inspect", args)
+	if err != nil {
+		return err
+	}
+	result, err := c.invoice.InspectInvoice(ctx, id)
+	if err != nil {
+		return fmt.Errorf("run invoice inspect command: %w", err)
+	}
+	output := OutputResult{Payload: result, TextWriter: func(w io.Writer) error { return buildInvoiceInspectText(w, result, c.colorEnabled) }}
+	if err := WriteOutput(out, format, output); err != nil {
+		return fmt.Errorf("write invoice inspect output: %w", err)
+	}
+	return nil
+}
+
+func (c Command) runInvoiceUpdateMetadata(ctx context.Context, args []string, out io.Writer) error {
+	cmd, format, err := parseInvoiceMetadataFlags(args)
+	if err != nil {
+		return err
+	}
+	result, err := c.invoice.UpdateInvoiceMetadata(ctx, cmd)
+	if err != nil {
+		return fmt.Errorf("run invoice update-metadata command: %w", err)
+	}
+	output := OutputResult{Payload: result, TextWriter: func(w io.Writer) error { return writeInvoiceUpdateMetadataText(w, result, c.colorEnabled) }}
+	if err := WriteOutput(out, format, output); err != nil {
+		return fmt.Errorf("write invoice update-metadata output: %w", err)
 	}
 	return nil
 }
@@ -556,6 +692,42 @@ func buildInvoiceShowText(out io.Writer, inv app.InvoiceDTO, colorEnabled bool) 
 
 	_, err := io.WriteString(out, b.String())
 	return err
+}
+
+func buildInvoiceInspectText(out io.Writer, inv app.InvoiceDTO, colorEnabled bool) error {
+	view := newTextView(out, colorEnabled)
+	view.Title("Invoice Inspect").Divider("───────────────")
+	view.Field("id", inv.ID)
+	view.Field("invoice_number", inv.InvoiceNumber)
+	view.Field("customer_id", inv.CustomerID)
+	view.Field("status", inv.Status)
+	view.Field("currency", inv.Currency)
+	view.Field("invoice_date", inv.InvoiceDate)
+	view.Field("issued_at", inv.IssuedAt)
+	view.Field("created_at", inv.CreatedAt)
+	view.Field("updated_at", inv.UpdatedAt)
+	view.Field("period_start", inv.PeriodStart)
+	view.Field("period_end", inv.PeriodEnd)
+	view.Field("due_date", inv.DueDate)
+	view.Field("payment_terms", inv.PaymentTerms)
+	view.Field("payment_communication", inv.PaymentCommunication)
+	view.Field("external_number", inv.ExternalNumber)
+	view.Field("import_source", inv.ImportSource)
+	view.Field("imported_at", inv.ImportedAt)
+	view.Field("lines", fmt.Sprintf("%d", len(inv.Lines)))
+	view.Field("subtotal", fmt.Sprintf("%d", inv.Subtotal))
+	view.Field("grand_total", fmt.Sprintf("%d", inv.GrandTotal))
+	_, err := io.WriteString(out, view.Build())
+	return err
+}
+
+func writeInvoiceUpdateMetadataText(out io.Writer, inv app.InvoiceDTO, colorEnabled bool) error {
+	view := newTextView(out, colorEnabled)
+	view.Title("Invoice Metadata Updated").Divider("────────────────────────")
+	if _, err := io.WriteString(out, view.Build()); err != nil {
+		return err
+	}
+	return buildInvoiceInspectText(out, inv, colorEnabled)
 }
 
 func buildInvoiceListText(out io.Writer, summaries []app.InvoiceSummaryDTO, customerID, statusFilter string, colorEnabled bool) error {

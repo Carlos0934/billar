@@ -14,7 +14,9 @@ type invoiceStoreStub struct {
 	createDraftInvoice         *core.Invoice
 	createDraftEntries         []*core.TimeEntry
 	updateInvoice              *core.Invoice
+	updateMetadataInvoice      *core.Invoice
 	updateErr                  error
+	updateMetadataErr          error
 	createDraftErr             error
 	getByIDRes                 *core.Invoice
 	getByIDErr                 error
@@ -29,6 +31,8 @@ type invoiceStoreStub struct {
 	removeLineInvoiceID        string
 	removeLineID               string
 	removeLineErr              error
+	importIssuedInvoice        *core.Invoice
+	importIssuedErr            error
 }
 
 func (s *invoiceStoreStub) CreateDraft(ctx context.Context, invoice *core.Invoice, entries []*core.TimeEntry) error {
@@ -55,6 +59,12 @@ func (s *invoiceStoreStub) Update(ctx context.Context, invoice *core.Invoice) er
 	return s.updateErr
 }
 
+func (s *invoiceStoreStub) UpdateMetadata(ctx context.Context, invoice *core.Invoice) error {
+	_ = ctx
+	s.updateMetadataInvoice = invoice
+	return s.updateMetadataErr
+}
+
 func (s *invoiceStoreStub) ListByCustomer(ctx context.Context, customerID string, status ...core.InvoiceStatus) ([]core.InvoiceSummary, error) {
 	_ = ctx
 	if s.listByCustomerStatusFilter != "" && (len(status) == 0 || string(status[0]) != s.listByCustomerStatusFilter) {
@@ -75,6 +85,37 @@ func (s *invoiceStoreStub) RemoveLine(ctx context.Context, invoiceID, lineID str
 	s.removeLineInvoiceID = invoiceID
 	s.removeLineID = lineID
 	return s.removeLineErr
+}
+
+func (s *invoiceStoreStub) ImportIssued(ctx context.Context, invoice *core.Invoice) error {
+	_ = ctx
+	s.importIssuedInvoice = invoice
+	return s.importIssuedErr
+}
+
+func (s *invoiceStoreStub) Ping(context.Context) error { return nil }
+
+func (s *invoiceStoreStub) SchemaVersion(context.Context) (int, error) { return 1, nil }
+
+type legalEntityFinderStub struct {
+	byTaxID     map[string]*core.LegalEntity
+	byLegalName map[string]*core.LegalEntity
+}
+
+func (s legalEntityFinderStub) FindByTaxID(ctx context.Context, taxID string) (*core.LegalEntity, error) {
+	_ = ctx
+	if entity := s.byTaxID[taxID]; entity != nil {
+		return entity, nil
+	}
+	return nil, ErrLegalEntityNotFound
+}
+
+func (s legalEntityFinderStub) FindByLegalName(ctx context.Context, legalName string) (*core.LegalEntity, error) {
+	_ = ctx
+	if entity := s.byLegalName[legalName]; entity != nil {
+		return entity, nil
+	}
+	return nil, ErrLegalEntityNotFound
 }
 
 type invoiceNumberGeneratorStub struct {
@@ -798,6 +839,74 @@ func TestInvoiceServiceGetInvoice_NotFound(t *testing.T) {
 	}
 }
 
+func TestInvoiceServiceInspectInvoice(t *testing.T) {
+	t.Parallel()
+
+	invoiceDate := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	line := core.InvoiceLine{ID: "inl_001", InvoiceID: "inv_001", Description: "Imported work", UnitRate: core.Money{Currency: "USD"}, AmountMinor: 250000}
+	invoice := core.Invoice{ID: "inv_001", InvoiceNumber: "INV-2026-0001", CustomerID: "cus_1", Status: core.InvoiceStatusIssued, Currency: "USD", Lines: []core.InvoiceLine{line}, InvoiceDate: invoiceDate, PaymentTerms: "Net 15", PaymentCommunication: "Use invoice", ExternalNumber: "EXT-001", ImportSource: "manual-pdf-extract", ImportedAt: invoiceDate.Add(12 * time.Hour)}
+	svc := NewInvoiceService(&invoiceStoreStub{getByIDRes: &invoice}, &timeEntryStoreStub{}, nil, nil)
+
+	dto, err := svc.InspectInvoice(context.Background(), "inv_001")
+	if err != nil {
+		t.Fatalf("InspectInvoice() error = %v", err)
+	}
+	if dto.ID != "inv_001" || dto.InvoiceDate != "2026-05-01T00:00:00Z" || dto.PaymentTerms != "Net 15" || dto.ImportSource != "manual-pdf-extract" {
+		t.Fatalf("InspectInvoice() dto = %+v, want full canonical invoice metadata", dto)
+	}
+
+	missingSvc := NewInvoiceService(&invoiceStoreStub{getByIDErr: ErrInvoiceNotFound}, &timeEntryStoreStub{}, nil, nil)
+	_, err = missingSvc.InspectInvoice(context.Background(), "inv_missing")
+	if !errors.Is(err, ErrInvoiceNotFound) {
+		t.Fatalf("InspectInvoice(missing) error = %v, want ErrInvoiceNotFound", err)
+	}
+}
+
+func TestInvoiceServiceUpdateInvoiceMetadata(t *testing.T) {
+	t.Parallel()
+
+	line := core.InvoiceLine{ID: "inl_001", InvoiceID: "inv_001", Description: "Imported work", UnitRate: core.Money{Currency: "USD"}, AmountMinor: 250000}
+	invoice := core.Invoice{ID: "inv_001", InvoiceNumber: "INV-2026-0001", CustomerID: "cus_1", Status: core.InvoiceStatusIssued, Currency: "USD", Lines: []core.InvoiceLine{line}, InvoiceDate: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), PeriodEnd: time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC), DueDate: time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC), PaymentTerms: "Old terms", PaymentCommunication: "Old communication", ExternalNumber: "EXT-001", ImportSource: "manual-pdf-extract", ImportedAt: time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC), IssuedAt: time.Date(2026, 4, 1, 8, 0, 0, 0, time.UTC), CreatedAt: time.Date(2026, 4, 1, 8, 0, 0, 0, time.UTC)}
+	invoices := &invoiceStoreStub{getByIDRes: &invoice}
+	svc := NewInvoiceService(invoices, &timeEntryStoreStub{}, nil, nil)
+
+	dto, err := svc.UpdateInvoiceMetadata(context.Background(), UpdateInvoiceMetadataCommand{InvoiceID: "inv_001", InvoiceDate: "2026-05-01", PaymentTerms: "Net 15", PaymentCommunication: "Use invoice INV-2026-0001"})
+	if err != nil {
+		t.Fatalf("UpdateInvoiceMetadata() error = %v", err)
+	}
+	if invoices.updateMetadataInvoice == nil {
+		t.Fatal("UpdateMetadata was not called")
+	}
+	if invoices.updateInvoice != nil {
+		t.Fatalf("Update was called for metadata path: %+v", invoices.updateInvoice)
+	}
+	if invoices.updateMetadataInvoice.InvoiceDate.Format(time.RFC3339) != "2026-05-01T00:00:00Z" || invoices.updateMetadataInvoice.PaymentTerms != "Net 15" || invoices.updateMetadataInvoice.PaymentCommunication != "Use invoice INV-2026-0001" {
+		t.Fatalf("stored metadata = %+v, want updated metadata", invoices.updateMetadataInvoice)
+	}
+	if invoices.updateMetadataInvoice.InvoiceNumber != "INV-2026-0001" || invoices.updateMetadataInvoice.ImportSource != "manual-pdf-extract" || !invoices.updateMetadataInvoice.ImportedAt.Equal(invoice.ImportedAt) || invoices.updateMetadataInvoice.Total(nil).Amount != 250000 {
+		t.Fatalf("identity or financial fields changed: %+v", invoices.updateMetadataInvoice)
+	}
+	if dto.InvoiceDate != "2026-05-01T00:00:00Z" || dto.PaymentTerms != "Net 15" || dto.GrandTotal != 250000 {
+		t.Fatalf("returned dto = %+v, want updated metadata and unchanged totals", dto)
+	}
+}
+
+func TestInvoiceServiceUpdateInvoiceMetadata_InvalidDateDoesNotWrite(t *testing.T) {
+	t.Parallel()
+
+	invoice := core.Invoice{ID: "inv_001", Status: core.InvoiceStatusIssued, Currency: "USD", Lines: []core.InvoiceLine{{ID: "inl_001", UnitRate: core.Money{Currency: "USD"}, AmountMinor: 250000}}}
+	invoices := &invoiceStoreStub{getByIDRes: &invoice}
+	svc := NewInvoiceService(invoices, &timeEntryStoreStub{}, nil, nil)
+
+	_, err := svc.UpdateInvoiceMetadata(context.Background(), UpdateInvoiceMetadataCommand{InvoiceID: "inv_001", DueDate: "not-a-date"})
+	if err == nil || !strings.Contains(err.Error(), "due_date") {
+		t.Fatalf("UpdateInvoiceMetadata() error = %v, want due_date validation error", err)
+	}
+	if invoices.updateMetadataInvoice != nil || invoices.updateInvoice != nil {
+		t.Fatalf("invalid date wrote updateMetadata=%+v update=%+v", invoices.updateMetadataInvoice, invoices.updateInvoice)
+	}
+}
+
 func TestInvoiceServiceListInvoices_HappyPath(t *testing.T) {
 	t.Parallel()
 
@@ -908,4 +1017,101 @@ func newIssueDraftService(t *testing.T, invoice *core.Invoice, entry *core.TimeE
 	invoices := &invoiceStoreStub{getByIDRes: invoice}
 	entries := &timeEntryStoreStub{getByIDRes: entry}
 	return NewInvoiceService(invoices, entries, nil, nil, numbers), invoices, entries
+}
+
+func TestInvoiceServiceImportIssuedHappyPathAndValidations(t *testing.T) {
+	t.Parallel()
+
+	invoices := &invoiceStoreStub{}
+	profiles := &customerProfileStoreForTimeEntry{getByIDRes: activeProfile()}
+	issuers := &defaultIssuerProfileStoreStub{profile: &core.IssuerProfile{ID: "iss_default", LegalEntityID: "le_issuer", DefaultCurrency: "USD"}}
+	numbers := &invoiceNumberGeneratorStub{next: "INV-2026-0001"}
+	svc := NewInvoiceService(invoices, nil, nil, profiles, numbers, issuers)
+
+	dto, err := svc.ImportIssued(context.Background(), ImportIssuedInvoiceCommand{Payload: validImportPayload()})
+	if err != nil {
+		t.Fatalf("ImportIssued() error = %v", err)
+	}
+	if invoices.importIssuedInvoice == nil {
+		t.Fatal("ImportIssued() did not persist invoice")
+	}
+	if numbers.callCount != 0 {
+		t.Fatalf("invoice number generator calls = %d, want 0", numbers.callCount)
+	}
+	if dto.InvoiceNumber != "INV/2026/00001" || dto.Status != "issued" || dto.GrandTotal != 250000 || len(dto.Lines) != 1 || dto.Lines[0].AmountMinor != 250000 || dto.Lines[0].QuantityDisplay != "160.00" {
+		t.Fatalf("dto = %+v, want imported invoice DTO with fixed line", dto)
+	}
+
+	_, err = svc.ImportIssued(context.Background(), ImportIssuedInvoiceCommand{Payload: ImportPayload{Schema: "wrong"}})
+	if !errors.Is(err, ErrUnsupportedImportSchema) {
+		t.Fatalf("schema error = %v, want ErrUnsupportedImportSchema", err)
+	}
+	payload := validImportPayload()
+	payload.Totals.GrandTotalMinor = 1
+	_, err = svc.ImportIssued(context.Background(), ImportIssuedInvoiceCommand{Payload: payload})
+	if !errors.Is(err, ErrImportTotalsMismatch) {
+		t.Fatalf("totals error = %v, want ErrImportTotalsMismatch", err)
+	}
+}
+
+func TestInvoiceServiceImportIssuedResolvesCustomerByTaxIDAndDefaultIssuer(t *testing.T) {
+	t.Parallel()
+
+	invoices := &invoiceStoreStub{}
+	profile := activeProfile()
+	profile.LegalEntityID = "le_customer"
+	profiles := &customerProfileStoreForTimeEntry{getByIDRes: profile}
+	finder := legalEntityFinderStub{byTaxID: map[string]*core.LegalEntity{"TAX-1": {ID: "le_customer", LegalName: "ACME", TaxID: "TAX-1"}}}
+	issuer := &core.IssuerProfile{ID: "iss_default", LegalEntityID: "le_issuer", DefaultCurrency: "USD"}
+	svc := NewInvoiceService(invoices, nil, nil, profiles, &defaultIssuerProfileStoreStub{profile: issuer}, finder)
+	payload := validImportPayload()
+	payload.Customer.CustomerProfileID = ""
+	payload.Customer.TaxID = "TAX-1"
+	payload.Issuer.IssuerProfileID = ""
+
+	_, err := svc.ImportIssued(context.Background(), ImportIssuedInvoiceCommand{Payload: payload})
+	if err != nil {
+		t.Fatalf("ImportIssued() error = %v", err)
+	}
+	if invoices.importIssuedInvoice == nil || invoices.importIssuedInvoice.CustomerID != "cus_abc123" {
+		t.Fatalf("imported invoice = %+v, want resolved customer", invoices.importIssuedInvoice)
+	}
+}
+
+func TestInvoiceServiceImportIssuedRejectsMissingCustomer(t *testing.T) {
+	t.Parallel()
+
+	invoices := &invoiceStoreStub{}
+	profiles := &customerProfileStoreForTimeEntry{getByIDRes: activeProfile()}
+	issuers := &defaultIssuerProfileStoreStub{profile: &core.IssuerProfile{ID: "iss_default", LegalEntityID: "le_issuer", DefaultCurrency: "USD"}}
+	svc := NewInvoiceService(invoices, nil, nil, profiles, issuers, legalEntityFinderStub{})
+	payload := validImportPayload()
+	payload.Customer.CustomerProfileID = ""
+	payload.Customer.TaxID = "NO-MATCH"
+	payload.Customer.LegalName = "Missing Customer LLC"
+
+	_, err := svc.ImportIssued(context.Background(), ImportIssuedInvoiceCommand{Payload: payload})
+	if !errors.Is(err, ErrImportCustomerProfileNotFound) {
+		t.Fatalf("ImportIssued() error = %v, want ErrImportCustomerProfileNotFound", err)
+	}
+	if invoices.importIssuedInvoice != nil {
+		t.Fatalf("ImportIssued persisted invoice %+v for missing customer", invoices.importIssuedInvoice)
+	}
+}
+
+func validImportPayload() ImportPayload {
+	return ImportPayload{
+		Schema:               "billar.invoice.import/v1",
+		InvoiceNumber:        "INV/2026/00001",
+		InvoiceDate:          "2026-02-02",
+		DueDate:              "2026-02-17",
+		Currency:             "USD",
+		PaymentTerms:         "15 Days",
+		PaymentCommunication: "INV/2026/00001",
+		Customer:             ImportPayloadCustomer{CustomerProfileID: "cus_abc123", LegalName: "ACME"},
+		Issuer:               ImportPayloadIssuer{IssuerProfileID: "iss_default", LegalName: "Me"},
+		Lines:                []ImportPayloadLine{{Description: "Software development", QuantityDisplay: "160.00", UnitPriceDisplay: "15.6250", AmountMinor: 250000}},
+		Totals:               ImportPayloadTotals{SubtotalMinor: 250000, GrandTotalMinor: 250000},
+		Source:               ImportPayloadSource{System: "manual-pdf-extract", ExternalID: "INV/2026/00001", ImportedAt: "2026-04-26T13:25:34Z"},
+	}
 }

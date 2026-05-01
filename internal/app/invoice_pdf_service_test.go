@@ -65,6 +65,37 @@ func TestInvoicePDFServiceRenderInvoicePDFUsesPersistedManualLineSnapshots(t *te
 	}
 }
 
+func TestInvoicePDFServiceRenderInvoicePDFPreservesImportedInvoiceDisplayFields(t *testing.T) {
+	ctx := context.Background()
+	fx := newInvoicePDFFixture(t)
+	line, err := core.NewImportedInvoiceLine(core.ImportInvoiceLineParams{Description: "Resolve and implement enhancement… with Cancún address", AmountMinor: 250000, TaxMinor: 0, QuantityDisplay: "160.00", UnitPriceDisplay: "15.6250", Currency: "USD"})
+	if err != nil {
+		t.Fatalf("NewImportedInvoiceLine() error = %v", err)
+	}
+	invoice, err := core.NewImportedInvoice(core.ImportInvoiceParams{CustomerID: fx.customer.ID, InvoiceNumber: "INV/2026/00001", InvoiceDate: time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC), DueDate: time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC), Currency: "USD", PaymentTerms: "15 Days", PaymentCommunication: "INV/2026/00001", ImportSource: "manual-pdf-extract", ExternalNumber: "INV/2026/00001", ImportedAt: time.Date(2026, 4, 26, 13, 25, 34, 0, time.UTC), Lines: []core.InvoiceLine{line}, SubtotalMinor: 250000, GrandTotalMinor: 250000})
+	if err != nil {
+		t.Fatalf("NewImportedInvoice() error = %v", err)
+	}
+	fx.invoice = invoice
+	fx.invoices.invoice = &fx.invoice
+	fx.entries.entries = map[string]*core.TimeEntry{}
+	renderer := &stubPDFRenderer{bytes: []byte("%PDF-imported")}
+	writer := &stubFileWriter{resolvedPath: "/tmp/imported.pdf", size: 13}
+	svc := NewInvoicePDFService(fx.invoices, fx.entries, fx.customers, fx.issuers, fx.legalEntities, renderer, writer)
+
+	_, err = svc.RenderInvoicePDF(ctx, RenderInvoicePDFCommand{InvoiceID: invoice.ID, OutputPath: "imported.pdf"})
+	if err != nil {
+		t.Fatalf("RenderInvoicePDF() error = %v", err)
+	}
+
+	if renderer.doc.InvoiceDate != "2026-02-02T00:00:00Z" || renderer.doc.PaymentTerms != "15 Days" || renderer.doc.PaymentComm != "INV/2026/00001" {
+		t.Fatalf("imported metadata = date %q terms %q communication %q", renderer.doc.InvoiceDate, renderer.doc.PaymentTerms, renderer.doc.PaymentComm)
+	}
+	if len(renderer.doc.Lines) != 1 || renderer.doc.Lines[0].QuantityDisplay != "160.00" || renderer.doc.Lines[0].UnitPriceDisplay != "15.6250" || renderer.doc.GrandTotal != 250000 {
+		t.Fatalf("imported line/doc = %+v totals %d", renderer.doc.Lines, renderer.doc.GrandTotal)
+	}
+}
+
 func TestInvoicePDFServiceRenderInvoicePDFUsesDefaultFilename(t *testing.T) {
 	ctx := context.Background()
 	fx := newInvoicePDFFixture(t)
@@ -229,12 +260,17 @@ func (s *stubPDFInvoiceStore) GetByID(context.Context, string) (*core.Invoice, e
 	return s.invoice, s.err
 }
 func (s *stubPDFInvoiceStore) Update(context.Context, *core.Invoice) error { return nil }
-func (s *stubPDFInvoiceStore) Delete(context.Context, string) error        { return nil }
+func (s *stubPDFInvoiceStore) UpdateMetadata(context.Context, *core.Invoice) error {
+	return nil
+}
+func (s *stubPDFInvoiceStore) Delete(context.Context, string) error { return nil }
 func (s *stubPDFInvoiceStore) ListByCustomer(context.Context, string, ...core.InvoiceStatus) ([]core.InvoiceSummary, error) {
 	return nil, nil
 }
 func (s *stubPDFInvoiceStore) AddLine(context.Context, string, core.InvoiceLine) error { return nil }
 func (s *stubPDFInvoiceStore) RemoveLine(context.Context, string, string) error        { return nil }
+func (s *stubPDFInvoiceStore) Ping(context.Context) error                              { return nil }
+func (s *stubPDFInvoiceStore) SchemaVersion(context.Context) (int, error)              { return 1, nil }
 
 type stubPDFTimeEntryStore struct{ entries map[string]*core.TimeEntry }
 

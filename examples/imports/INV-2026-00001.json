@@ -1,0 +1,16 @@
+{
+  "schema": "billar.invoice.import/v1",
+  "invoice_number": "INV/2026/00001",
+  "invoice_date": "2026-02-02",
+  "due_date": "2026-02-17",
+  "currency": "USD",
+  "payment_terms": "15 Days",
+  "payment_communication": "INV/2026/00001",
+  "customer": { "customer_profile_id": "cus_existing" },
+  "issuer": { "issuer_profile_id": "iss_existing" },
+  "lines": [
+    { "description": "Software development services", "quantity_display": "160.00", "unit_price_display": "15.6250", "amount_minor": 250000, "tax_minor": 0 }
+  ],
+  "totals": { "subtotal_minor": 250000, "tax_total_minor": 0, "grand_total_minor": 250000 },
+  "source": { "system": "manual-pdf-extract", "external_id": "INV/2026/00001", "imported_at": "2026-04-26T13:25:34Z" }
+}

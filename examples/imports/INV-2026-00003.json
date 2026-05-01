@@ -1,0 +1,13 @@
+{
+  "schema": "billar.invoice.import/v1",
+  "invoice_number": "INV/2026/00003",
+  "invoice_date": "2026-04-02",
+  "due_date": "2026-04-17",
+  "currency": "USD",
+  "customer": { "customer_profile_id": "cus_existing" },
+  "issuer": { "issuer_profile_id": "iss_existing" },
+  "lines": [
+    { "description": "Maintenance services", "quantity_display": "40.00", "unit_price_display": "50.0000", "amount_minor": 200000 }
+  ],
+  "totals": { "subtotal_minor": 200000, "tax_total_minor": 0, "grand_total_minor": 200000 }
+}

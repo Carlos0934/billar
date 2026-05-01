@@ -10,6 +10,18 @@ import (
 
 type RootedWriter struct{ Root string }
 type DirectWriter struct{}
+type FlexibleWriter struct{ Root string }
+
+func (w FlexibleWriter) Resolve(filename, outputPath string) (string, error) {
+	if filepath.IsAbs(strings.TrimSpace(outputPath)) || strings.TrimSpace(w.Root) == "" {
+		return (DirectWriter{}).Resolve(filename, outputPath)
+	}
+	return (RootedWriter{Root: w.Root}).Resolve(filename, outputPath)
+}
+
+func (FlexibleWriter) Write(absPath string, data []byte) (int64, error) {
+	return writeFile(absPath, data)
+}
 
 func (w RootedWriter) Resolve(filename, outputPath string) (string, error) {
 	root := strings.TrimSpace(w.Root)
