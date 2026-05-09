@@ -70,6 +70,33 @@ func TestQuoteStoreAddLineUpdatesLineDerivedTotalAndListsByFilter(t *testing.T) 
 	}
 }
 
+func TestQuoteStoreQuoteDoesNotAppearInInvoiceStore(t *testing.T) {
+	t.Parallel()
+
+	store := newQuoteTestStore(t)
+	quoteStore := NewQuoteStore(store)
+	invoiceStore := NewInvoiceStore(store)
+	quote := quoteFixture(t, "quo_not_invoice", core.QuoteStatusAccepted)
+	quote.Lines = []core.QuoteLine{quoteLineFixture("qol_not_invoice", quote.ID, 45, 12000)}
+
+	if err := quoteStore.Create(context.Background(), quote); err != nil {
+		t.Fatalf("Create(quote) error = %v", err)
+	}
+
+	invoices, err := invoiceStore.ListByCustomer(context.Background(), quote.CustomerID)
+	if err != nil {
+		t.Fatalf("ListByCustomer(invoices) error = %v", err)
+	}
+	if len(invoices) != 0 {
+		t.Fatalf("invoice summaries = %+v, want no invoices for persisted quote", invoices)
+	}
+
+	_, err = invoiceStore.GetByID(context.Background(), quote.ID)
+	if !errors.Is(err, app.ErrInvoiceNotFound) {
+		t.Fatalf("GetByID(quote ID as invoice) error = %v, want ErrInvoiceNotFound", err)
+	}
+}
+
 func TestQuoteStoreUpdateDeleteAndNotFound(t *testing.T) {
 	t.Parallel()
 
