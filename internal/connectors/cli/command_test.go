@@ -212,7 +212,7 @@ func TestCommandRunWritesHealthOutput(t *testing.T) {
 	}
 }
 
-func TestCommandHelpIncludesGlobalSetupBackup(t *testing.T) {
+func TestCommandHelpIncludesGlobalCommands(t *testing.T) {
 	t.Parallel()
 
 	cmd := NewCommand(stubHealthService{status: app.HealthDTO{Name: "billar", Status: "ok"}}, nil, nil, nil, nil, nil, nil, false)
@@ -221,7 +221,7 @@ func TestCommandHelpIncludesGlobalSetupBackup(t *testing.T) {
 		t.Fatalf("Run(--help) error = %v", err)
 	}
 	got := out.String()
-	for _, want := range []string{"setup", "backup <create|list|restore>", "doctor"} {
+	for _, want := range []string{"setup", "backup <create|list|restore>", "doctor", "quote <create|list|show|add-line|send|accept|reject|expire|delete|pdf>"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("help output missing %q:\n%s", want, got)
 		}
