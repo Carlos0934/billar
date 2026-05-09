@@ -133,6 +133,68 @@ func TestRendererPaginatesManyLinesAndRepeatsHeader(t *testing.T) {
 	}
 }
 
+func TestRendererRendersQuoteProposalVocabularyPartiesLinesAndTotals(t *testing.T) {
+	doc := fixtureQuoteProposalDocument(2)
+
+	got, err := (Renderer{}).RenderQuoteProposal(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("RenderQuoteProposal() error = %v", err)
+	}
+	if !bytes.HasPrefix(got, []byte("%PDF-")) {
+		t.Fatalf("RenderQuoteProposal() prefix = %q, want %%PDF-", string(got[:min(len(got), 5)]))
+	}
+	if len(got) < 1000 {
+		t.Fatalf("RenderQuoteProposal() length = %d, want non-trivial PDF", len(got))
+	}
+
+	for _, want := range []string{
+		"QUOTE PROPOSAL",
+		"Quote quo_123",
+		"QUOTE DATE", "04/10/2026",
+		"VALIDITY", "SENT 04/11/2026",
+		"PROPOSED TO", "FROM",
+		"Customer LLC", "Issuer Inc",
+		"Implementation workshop", "Support retainer",
+		"ESTIMATED HOURS", "2", "5",
+		"UNIT RATE", "USD$ 100.00", "USD$ 200.00",
+		"PROPOSAL TOTAL", "USD$ 1,200.00",
+	} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Fatalf("RenderQuoteProposal() PDF missing %q", want)
+		}
+	}
+	for _, notWant := range []string{"INVOICE", "BILL TO", "PAYMENT COMMUNICATION", "DUE DATE", "USD 120000", "USD$ 120000"} {
+		if bytes.Contains(got, []byte(notWant)) {
+			t.Fatalf("RenderQuoteProposal() PDF contains %q", notWant)
+		}
+	}
+}
+
+func TestRendererRendersQuoteProposalUsingLineDerivedTotal(t *testing.T) {
+	doc := fixtureQuoteProposalDocument(0)
+	doc.Total = 999999
+	doc.Lines = []app.QuoteProposalDocumentLineDTO{
+		{Description: "Discovery sprint", QuantityMin: 90, UnitRateAmount: 10000, UnitRateCurrency: "USD", LineTotalAmount: 15000, LineTotalCurrency: "USD"},
+		{Description: "Architecture plan", QuantityMin: 120, UnitRateAmount: 12500, UnitRateCurrency: "USD", LineTotalAmount: 25000, LineTotalCurrency: "USD"},
+	}
+
+	got, err := (Renderer{}).RenderQuoteProposal(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("RenderQuoteProposal() error = %v", err)
+	}
+
+	for _, want := range []string{"Discovery sprint", "Architecture plan", "USD$ 400.00"} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Fatalf("RenderQuoteProposal() PDF missing %q", want)
+		}
+	}
+	for _, notWant := range []string{"USD$ 9,999.99", "INVOICE"} {
+		if bytes.Contains(got, []byte(notWant)) {
+			t.Fatalf("RenderQuoteProposal() PDF contains %q", notWant)
+		}
+	}
+}
+
 func fixtureInvoiceDocument(lines int) app.InvoiceDocumentDTO {
 	doc := app.InvoiceDocumentDTO{
 		InvoiceID: "inv_123", InvoiceNumber: "INV-2026-0001", Status: "issued", Currency: "USD", PeriodStart: "2026-04-01T00:00:00Z", PeriodEnd: "2026-04-30T00:00:00Z", DueDate: "2026-05-15T00:00:00Z", InvoiceDate: "2026-04-11T00:00:00Z", CreatedAt: "2026-04-10T00:00:00Z", IssuedAt: "2026-04-11T00:00:00Z",
@@ -145,6 +207,28 @@ func fixtureInvoiceDocument(lines int) app.InvoiceDocumentDTO {
 	}
 	doc.GrandTotal = doc.Subtotal
 	doc.Notes = strings.Repeat("Thank you. ", 2)
+	return doc
+}
+
+func fixtureQuoteProposalDocument(lines int) app.QuoteProposalDocumentDTO {
+	doc := app.QuoteProposalDocumentDTO{
+		QuoteID:   "quo_123",
+		Status:    "sent",
+		Currency:  "USD",
+		CreatedAt: "2026-04-10T00:00:00Z",
+		SentAt:    "2026-04-11T00:00:00Z",
+		Issuer:    app.QuoteProposalDocumentPartyDTO{LegalName: "Issuer Inc", TaxID: "I-123", Email: "issuer@example.test", Website: "https://issuer.example", BillingAddress: app.AddressDTO{Street: "Issuer St", City: "Santo Domingo", Country: "DO"}},
+		Customer:  app.QuoteProposalDocumentPartyDTO{LegalName: "Customer LLC", TaxID: "C-123", Email: "billing@example.test", BillingAddress: app.AddressDTO{Street: "Customer St", City: "Santo Domingo", Country: "DO"}},
+		Notes:     "This proposal is valid for 30 days.",
+	}
+	fixtures := []app.QuoteProposalDocumentLineDTO{
+		{Description: "Implementation workshop", QuantityMin: 120, UnitRateAmount: 10000, UnitRateCurrency: "USD", LineTotalAmount: 20000, LineTotalCurrency: "USD"},
+		{Description: "Support retainer", QuantityMin: 300, UnitRateAmount: 20000, UnitRateCurrency: "USD", LineTotalAmount: 100000, LineTotalCurrency: "USD"},
+	}
+	for i := 0; i < lines && i < len(fixtures); i++ {
+		doc.Lines = append(doc.Lines, fixtures[i])
+		doc.Total += fixtures[i].LineTotalAmount
+	}
 	return doc
 }
 

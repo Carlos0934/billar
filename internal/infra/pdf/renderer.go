@@ -64,6 +64,69 @@ func (Renderer) Render(ctx context.Context, doc app.InvoiceDocumentDTO) ([]byte,
 	return buf.Bytes(), nil
 }
 
+func (Renderer) RenderQuoteProposal(ctx context.Context, doc app.QuoteProposalDocumentDTO) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	p := fpdf.NewCustom(&fpdf.InitType{UnitStr: "in", Size: fpdf.SizeType{Wd: pageWidthIn, Ht: pageHeightIn}})
+	p.SetCompression(false)
+	p.SetTitle("Quote Proposal "+doc.QuoteID, true)
+	p.SetMargins(marginIn, marginIn, marginIn)
+	p.SetAutoPageBreak(false, marginIn)
+	p.AliasNbPages("{nb}")
+	tr := pdfText(p.UnicodeTranslatorFromDescriptor(""))
+
+	addQuotePageWithHeader(p, tr, doc)
+	y := 3.48
+	for _, line := range doc.Lines {
+		rowH := quoteLineBlockHeight(p, line)
+		if y+rowH > 6.72 {
+			writeQuoteFooter(p, tr, doc)
+			addQuotePageWithHeader(p, tr, doc)
+			y = 3.48
+		}
+		writeQuoteLineBlock(p, tr, y, line)
+		y += rowH + 0.08
+	}
+	if y > 6.55 {
+		writeQuoteFooter(p, tr, doc)
+		addQuotePageWithHeader(p, tr, doc)
+		y = 3.48
+	}
+	writeQuoteTotals(p, tr, y+0.04, doc)
+	writeQuoteFooter(p, tr, doc)
+
+	var buf bytes.Buffer
+	if err := p.Output(&buf); err != nil {
+		return nil, fmt.Errorf("output quote proposal pdf: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+func addQuotePageWithHeader(p *fpdf.Fpdf, tr pdfText, doc app.QuoteProposalDocumentDTO) {
+	p.AddPage()
+	p.SetFillColor(255, 255, 255)
+	p.Rect(0, 0, pageWidthIn, pageHeightIn, "F")
+	p.SetTextColor(32, 32, 32)
+	p.SetFont("Helvetica", "B", 28)
+	p.SetXY(marginIn, 0.38)
+	p.CellFormat(contentWidth, 0.32, tr("QUOTE PROPOSAL"), "", 0, "L", false, 0, "")
+	p.SetFont("Helvetica", "", 10)
+	p.SetXY(marginIn, 0.78)
+	p.CellFormat(contentWidth, 0.16, tr("Quote "+doc.QuoteID), "", 0, "L", false, 0, "")
+	drawRule(p, 1.06)
+
+	colW := contentWidth / 3
+	writeMetaCell(p, tr, marginIn, 1.23, colW, "QUOTE DATE", displayDate(doc.CreatedAt))
+	writeMetaCell(p, tr, marginIn+colW, 1.23, colW, "VALIDITY", quoteValidity(doc))
+	writeMetaCell(p, tr, marginIn+2*colW, 1.23, colW, "STATUS", strings.ToUpper(firstNonEmpty(doc.Status, "draft")))
+	drawRule(p, 1.74)
+
+	writeQuotePartyColumn(p, tr, marginIn, 1.94, "PROPOSED TO", doc.Customer, "L")
+	writeQuotePartyColumn(p, tr, marginIn+contentWidth/2+0.14, 1.94, "FROM", doc.Issuer, "L")
+	drawRule(p, 3.30)
+}
+
 func addPageWithHeader(p *fpdf.Fpdf, tr pdfText, doc app.InvoiceDocumentDTO) {
 	p.AddPage()
 	p.SetFillColor(255, 255, 255)
@@ -108,6 +171,17 @@ func writePartyColumn(p *fpdf.Fpdf, tr pdfText, x, y float64, title string, part
 	p.SetFont("Helvetica", "", 7.3)
 	p.SetXY(x, y+0.25)
 	p.MultiCell(2.35, 0.12, tr(safePDFText(partyBlock(party))), "", align, false)
+}
+
+func writeQuotePartyColumn(p *fpdf.Fpdf, tr pdfText, x, y float64, title string, party app.QuoteProposalDocumentPartyDTO, align string) {
+	p.SetTextColor(90, 90, 90)
+	p.SetFont("Helvetica", "B", 8)
+	p.SetXY(x, y)
+	p.CellFormat(2.35, 0.16, tr(title), "", 0, align, false, 0, "")
+	p.SetTextColor(32, 32, 32)
+	p.SetFont("Helvetica", "", 7.3)
+	p.SetXY(x, y+0.25)
+	p.MultiCell(2.35, 0.12, tr(safePDFText(quotePartyBlock(party))), "", align, false)
 }
 
 func writeLineBlock(p *fpdf.Fpdf, tr pdfText, y float64, line app.InvoiceDocumentLineDTO) {
@@ -164,9 +238,35 @@ func writePricingColumn(p *fpdf.Fpdf, tr pdfText, x, y, w float64, label, value,
 	p.CellFormat(w-0.06, 0.14, tr(safePDFText(value)), "", 0, align, false, 0, "")
 }
 
+func writeQuoteLineBlock(p *fpdf.Fpdf, tr pdfText, y float64, line app.QuoteProposalDocumentLineDTO) {
+	description := safePDFText(line.Description)
+	p.SetTextColor(90, 90, 90)
+	p.SetFont("Helvetica", "B", 7)
+	p.SetXY(marginIn, y)
+	p.CellFormat(contentWidth, 0.12, tr("PROPOSED WORK"), "", 0, "L", false, 0, "")
+
+	p.SetTextColor(32, 32, 32)
+	p.SetFont("Helvetica", "", 8)
+	p.SetXY(marginIn, y+0.23)
+	p.MultiCell(contentWidth, 0.15, tr(description), "", "L", false)
+
+	pricingY := y + workDescriptionHeight(p, description) + 0.20
+	drawRule(p, pricingY)
+	pricingY += 0.19
+	colW := contentWidth / 4
+	writePricingColumn(p, tr, marginIn, pricingY, colW, "ESTIMATED HOURS", quoteQuantity(line), "L")
+	writePricingColumn(p, tr, marginIn+colW, pricingY, colW, "UNIT RATE", money(line.UnitRateAmount, line.UnitRateCurrency), "L")
+	writePricingColumn(p, tr, marginIn+2*colW, pricingY, colW, "LINE TOTAL", money(line.LineTotalAmount, firstNonEmpty(line.LineTotalCurrency, line.UnitRateCurrency)), "R")
+	drawRule(p, pricingY+0.46)
+}
+
 func lineBlockHeight(p *fpdf.Fpdf, line app.InvoiceDocumentLineDTO) float64 {
 	return workDescriptionHeight(p, safePDFText(line.Description)) + 0.86
 
+}
+
+func quoteLineBlockHeight(p *fpdf.Fpdf, line app.QuoteProposalDocumentLineDTO) float64 {
+	return workDescriptionHeight(p, safePDFText(line.Description)) + 0.86
 }
 
 func workDescriptionHeight(p *fpdf.Fpdf, description string) float64 {
@@ -190,7 +290,34 @@ func writeTotals(p *fpdf.Fpdf, tr pdfText, y float64, doc app.InvoiceDocumentDTO
 	}
 }
 
+func writeQuoteTotals(p *fpdf.Fpdf, tr pdfText, y float64, doc app.QuoteProposalDocumentDTO) {
+	p.SetTextColor(32, 32, 32)
+	p.SetFont("Helvetica", "B", 10)
+	colW := contentWidth / 4
+	totalY := y + 0.06
+	p.SetXY(marginIn+2*colW, totalY)
+	p.CellFormat(colW-0.06, lineHeightIn, tr("PROPOSAL TOTAL"), "", 0, "R", false, 0, "")
+	p.CellFormat(colW-0.06, lineHeightIn, tr(money(quoteLineTotal(doc.Lines), doc.Currency)), "", 0, "R", false, 0, "")
+	if strings.TrimSpace(doc.Notes) != "" {
+		p.SetTextColor(90, 90, 90)
+		p.SetFont("Helvetica", "", 7)
+		p.SetXY(marginIn, totalY)
+		p.MultiCell(2.35, 0.15, tr(safePDFText(doc.Notes)), "", "L", false)
+	}
+}
+
 func writeFooter(p *fpdf.Fpdf, tr pdfText, doc app.InvoiceDocumentDTO) {
+	drawRule(p, 7.18)
+	footer := strings.Join(nonEmpty(doc.Issuer.Email, doc.Issuer.Website), " | ")
+	p.SetTextColor(90, 90, 90)
+	p.SetFont("Helvetica", "", 7)
+	p.SetXY(marginIn, 7.32)
+	p.CellFormat(contentWidth, 0.15, tr(safePDFText(footer)), "", 0, "C", false, 0, "")
+	p.SetXY(marginIn, 7.50)
+	p.CellFormat(contentWidth, 0.15, tr(fmt.Sprintf("Page: %d of {nb}", p.PageNo())), "", 0, "C", false, 0, "")
+}
+
+func writeQuoteFooter(p *fpdf.Fpdf, tr pdfText, doc app.QuoteProposalDocumentDTO) {
 	drawRule(p, 7.18)
 	footer := strings.Join(nonEmpty(doc.Issuer.Email, doc.Issuer.Website), " | ")
 	p.SetTextColor(90, 90, 90)
@@ -209,6 +336,35 @@ func partyBlock(p app.InvoiceDocumentPartyDTO) string {
 		parts = append(parts, "Tax ID: "+p.TaxID)
 	}
 	return strings.Join(nonEmpty(parts...), "\n")
+}
+
+func quotePartyBlock(p app.QuoteProposalDocumentPartyDTO) string {
+	parts := []string{p.LegalName}
+	addr := nonEmpty(p.BillingAddress.Street, p.BillingAddress.City, p.BillingAddress.State, p.BillingAddress.PostalCode, p.BillingAddress.Country)
+	parts = append(parts, addr...)
+	if p.TaxID != "" {
+		parts = append(parts, "Tax ID: "+p.TaxID)
+	}
+	return strings.Join(nonEmpty(parts...), "\n")
+}
+
+func quoteValidity(doc app.QuoteProposalDocumentDTO) string {
+	if strings.TrimSpace(doc.SentAt) == "" {
+		return "DRAFT"
+	}
+	return "SENT " + displayDate(doc.SentAt)
+}
+
+func quoteQuantity(line app.QuoteProposalDocumentLineDTO) string {
+	return formatQuantityMinutes(line.QuantityMin)
+}
+
+func quoteLineTotal(lines []app.QuoteProposalDocumentLineDTO) int64 {
+	var total int64
+	for _, line := range lines {
+		total += line.LineTotalAmount
+	}
+	return total
 }
 
 func drawRule(p *fpdf.Fpdf, y float64) {
