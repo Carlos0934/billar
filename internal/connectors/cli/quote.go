@@ -21,11 +21,12 @@ type QuoteServiceProvider interface {
 	Reject(ctx context.Context, id string) (app.QuoteDTO, error)
 	Expire(ctx context.Context, id string) (app.QuoteDTO, error)
 	Delete(ctx context.Context, id string) error
+	RenderQuotePDF(ctx context.Context, cmd app.RenderQuotePDFCommand) (app.QuoteRenderedFileDTO, error)
 }
 
 func (c Command) runQuote(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: billar quote <create|list|show|add-line|send|accept|reject|expire|delete> [flags]")
+		return errors.New("usage: billar quote <create|list|show|add-line|send|accept|reject|expire|delete|pdf> [flags]")
 	}
 	if c.quote == nil {
 		return errors.New("quote service is required")
@@ -84,9 +85,23 @@ func (c Command) runQuote(ctx context.Context, args []string, out io.Writer) err
 		}
 		payload := map[string]string{"id": id, "status": "deleted"}
 		return WriteOutput(out, format, OutputResult{Payload: payload, TextWriter: func(w io.Writer) error { _, err := fmt.Fprintf(w, "Quote deleted: %s\n", id); return err }})
+	case "pdf":
+		return c.runQuotePDF(ctx, args[1:], out)
 	default:
 		return fmt.Errorf("unknown command %q", strings.Join([]string{"quote", args[0]}, " "))
 	}
+}
+
+func (c Command) runQuotePDF(ctx context.Context, args []string, out io.Writer) error {
+	cmd, format, err := parseQuotePDFFlags(args)
+	if err != nil {
+		return err
+	}
+	result, err := c.quote.RenderQuotePDF(ctx, cmd)
+	if err != nil {
+		return fmt.Errorf("run quote pdf command: %w", err)
+	}
+	return WriteOutput(out, format, OutputResult{Payload: result, TextWriter: func(w io.Writer) error { return writeQuoteRenderedFileText(w, result, c.colorEnabled) }})
 }
 
 func (c Command) runQuoteLifecycle(ctx context.Context, action string, args []string, out io.Writer) error {
@@ -205,6 +220,58 @@ func parseQuoteAddLineFlags(args []string) (app.AddQuoteLineCommand, Format, err
 	}
 	format, err := ParseFormat(formatValue)
 	return app.AddQuoteLineCommand{QuoteID: quoteID, ServiceAgreementID: agreementID, Description: description, QuantityMin: minutes}, format, err
+}
+
+func parseQuotePDFFlags(args []string) (app.RenderQuotePDFCommand, Format, error) {
+	var quoteID, outPath, formatValue string
+	formatValue = string(FormatText)
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--out":
+			if i+1 >= len(args) {
+				return app.RenderQuotePDFCommand{}, "", errors.New("--out is required")
+			}
+			outPath = args[i+1]
+			i++
+		case "--format":
+			if i+1 >= len(args) {
+				return app.RenderQuotePDFCommand{}, "", errors.New("--format requires a value")
+			}
+			formatValue = args[i+1]
+			i++
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				return app.RenderQuotePDFCommand{}, "", fmt.Errorf("quote pdf: unknown flag %s", args[i])
+			}
+			if quoteID != "" {
+				return app.RenderQuotePDFCommand{}, "", errors.New("usage: billar quote pdf <quote-id> --out <path>")
+			}
+			quoteID = args[i]
+		}
+	}
+	if strings.TrimSpace(quoteID) == "" {
+		return app.RenderQuotePDFCommand{}, "", errors.New("quote id is required")
+	}
+	if strings.TrimSpace(outPath) == "" {
+		return app.RenderQuotePDFCommand{}, "", errors.New("--out is required")
+	}
+	format, err := ParseFormat(formatValue)
+	if err != nil {
+		return app.RenderQuotePDFCommand{}, "", err
+	}
+	return app.RenderQuotePDFCommand{QuoteID: strings.TrimSpace(quoteID), OutputPath: strings.TrimSpace(outPath)}, format, nil
+}
+
+func writeQuoteRenderedFileText(out io.Writer, file app.QuoteRenderedFileDTO, colorEnabled bool) error {
+	view := newTextView(out, colorEnabled)
+	view.Title("Quote PDF Exported").Divider("──────────────────")
+	view.Field("Quote", file.QuoteID)
+	view.Field("Filename", file.Filename)
+	view.Field("Path", file.Path)
+	view.Field("MIME Type", file.MimeType)
+	view.Field("Size", fmt.Sprintf("%d bytes", file.SizeBytes))
+	_, err := io.WriteString(out, view.Build())
+	return err
 }
 
 func writeQuoteText(out io.Writer, title string, result app.QuoteDTO, colorEnabled bool) error {

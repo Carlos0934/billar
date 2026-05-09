@@ -38,6 +38,9 @@ type stubQuoteService struct {
 	expireErr error
 	deleteID  string
 	deleteErr error
+	pdfArg    app.RenderQuotePDFCommand
+	pdfRes    app.QuoteRenderedFileDTO
+	pdfErr    error
 }
 
 func (s *stubQuoteService) Create(ctx context.Context, cmd app.CreateQuoteCommand) (app.QuoteDTO, error) {
@@ -92,6 +95,12 @@ func (s *stubQuoteService) Delete(ctx context.Context, id string) error {
 	_ = ctx
 	s.deleteID = id
 	return s.deleteErr
+}
+
+func (s *stubQuoteService) RenderQuotePDF(ctx context.Context, cmd app.RenderQuotePDFCommand) (app.QuoteRenderedFileDTO, error) {
+	_ = ctx
+	s.pdfArg = cmd
+	return s.pdfRes, s.pdfErr
 }
 
 func newTestQuoteCommand(svc QuoteServiceProvider) Command {
@@ -213,6 +222,62 @@ func TestQuoteLifecycleAndDeleteCommands(t *testing.T) {
 	}
 }
 
+func TestQuotePDFCommandFormatsSharePayload(t *testing.T) {
+	t.Parallel()
+
+	result := app.QuoteRenderedFileDTO{QuoteID: "quo_001", Filename: "quo_001.pdf", Path: "/tmp/quo_001.pdf", MimeType: "application/pdf", SizeBytes: 1234}
+	tests := []struct {
+		name      string
+		formatArg string
+		wantText  string
+		check     func(*testing.T, string)
+	}{
+		{name: "text", wantText: "Quote PDF Exported", check: func(t *testing.T, out string) {
+			if !strings.Contains(out, "Quote") || !strings.Contains(out, "/tmp/quo_001.pdf") || !strings.Contains(out, "1234 bytes") {
+				t.Fatalf("text output = %q, want quote pdf metadata", out)
+			}
+		}},
+		{name: "json", formatArg: "json", check: func(t *testing.T, out string) {
+			var dto app.QuoteRenderedFileDTO
+			if err := json.Unmarshal([]byte(out), &dto); err != nil {
+				t.Fatalf("json output invalid: %v", err)
+			}
+			if dto != result {
+				t.Fatalf("json dto = %+v, want %+v", dto, result)
+			}
+		}},
+		{name: "toon", formatArg: "toon", wantText: "quote_id", check: func(t *testing.T, out string) {
+			if !strings.Contains(out, "quote_id") || !strings.Contains(out, "size_bytes") || !strings.Contains(out, "application/pdf") {
+				t.Fatalf("toon output = %q, want canonical quote pdf fields", out)
+			}
+		}},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			svc := &stubQuoteService{pdfRes: result}
+			args := []string{"quote", "pdf", "quo_001", "--out", "/tmp/quo_001.pdf"}
+			if tc.formatArg != "" {
+				args = append(args, "--format", tc.formatArg)
+			}
+			var out bytes.Buffer
+			err := newTestQuoteCommand(svc).Run(context.Background(), args, &out)
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if svc.pdfArg != (app.RenderQuotePDFCommand{QuoteID: "quo_001", OutputPath: "/tmp/quo_001.pdf"}) {
+				t.Fatalf("pdf arg = %+v", svc.pdfArg)
+			}
+			if tc.wantText != "" && !strings.Contains(out.String(), tc.wantText) {
+				t.Fatalf("output = %q, want contains %q", out.String(), tc.wantText)
+			}
+			tc.check(t, out.String())
+		})
+	}
+}
+
 func TestQuoteCommandValidation(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -222,6 +287,8 @@ func TestQuoteCommandValidation(t *testing.T) {
 		{[]string{"quote", "create", "--currency", "USD"}, "--customer-id is required"},
 		{[]string{"quote", "add-line", "quo_001", "--agreement-id", "agr_1", "--description", "Consulting", "--minutes", "0"}, "--minutes must be greater than 0"},
 		{[]string{"quote", "show"}, "--id is required"},
+		{[]string{"quote", "pdf"}, "quote id is required"},
+		{[]string{"quote", "pdf", "quo_001"}, "--out is required"},
 		{[]string{"quote", "wat"}, "unknown command"},
 	}
 	for _, tc := range tests {

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Carlos0934/billar/internal/app"
 	"github.com/Carlos0934/billar/internal/infra/backup"
 	"github.com/Carlos0934/billar/internal/infra/config"
 	infrasqlite "github.com/Carlos0934/billar/internal/infra/sqlite"
@@ -293,6 +294,42 @@ func TestNewCommandWiresQuoteService(t *testing.T) {
 	}
 }
 
+func TestNewCommandWiresQuotePDFService(t *testing.T) {
+	t.Parallel()
+
+	store := mustOpenCLIStore(t)
+	seedCLIWiringFixture(t, store.DB())
+	exportDir := t.TempDir()
+	cmd := newCommand(config.Config{AppName: "billar", ColorEnabled: false, ExportDir: exportDir}, store)
+
+	var createOut bytes.Buffer
+	if err := cmd.Run(context.Background(), []string{"quote", "create", "--customer-id", "cus_cli_wiring", "--currency", "USD", "--format", "json"}, &createOut); err != nil {
+		t.Fatalf("quote create Run() error = %v", err)
+	}
+	var quote app.QuoteDTO
+	if err := json.Unmarshal(createOut.Bytes(), &quote); err != nil {
+		t.Fatalf("quote create output invalid: %v", err)
+	}
+
+	var lineOut bytes.Buffer
+	if err := cmd.Run(context.Background(), []string{"quote", "add-line", quote.ID, "--agreement-id", "sa_cli_wiring", "--description", "Proposal wiring", "--minutes", "60", "--format", "json"}, &lineOut); err != nil {
+		t.Fatalf("quote add-line Run() error = %v", err)
+	}
+
+	outPath := filepath.Join(exportDir, "proposal.pdf")
+	var pdfOut bytes.Buffer
+	if err := cmd.Run(context.Background(), []string{"quote", "pdf", quote.ID, "--out", outPath, "--format", "json"}, &pdfOut); err != nil {
+		t.Fatalf("quote pdf Run() error = %v", err)
+	}
+	var exported app.QuoteRenderedFileDTO
+	if err := json.Unmarshal(pdfOut.Bytes(), &exported); err != nil {
+		t.Fatalf("quote pdf output invalid: %v", err)
+	}
+	if exported.QuoteID != quote.ID || exported.Path != outPath || exported.MimeType != "application/pdf" || exported.SizeBytes == 0 {
+		t.Fatalf("quote pdf output = %+v, want wired export metadata", exported)
+	}
+}
+
 func TestNewCommandWiresSetupBackupAndDoctorReadiness(t *testing.T) {
 	t.Parallel()
 
@@ -344,6 +381,18 @@ INSERT INTO legal_entities (id, type, legal_name, trade_name, tax_id, email, pho
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		"le_cli_wiring", "company", "CLI Wiring Co", "", "", "", "", "", "{}", now, now); err != nil {
 		t.Fatalf("insert legal entity: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `
+INSERT INTO legal_entities (id, type, legal_name, trade_name, tax_id, email, phone, website, billing_address, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"le_cli_issuer", "company", "CLI Issuer Co", "", "", "", "", "", "{}", now, now); err != nil {
+		t.Fatalf("insert issuer legal entity: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `
+INSERT INTO issuer_profiles (id, legal_entity_id, default_currency, default_notes, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)`,
+		"iss_cli_wiring", "le_cli_issuer", "USD", "", now, now); err != nil {
+		t.Fatalf("insert issuer profile: %v", err)
 	}
 	if _, err := db.ExecContext(context.Background(), `
 INSERT INTO customer_profiles (id, legal_entity_id, status, default_currency, notes, created_at, updated_at)
