@@ -10,7 +10,7 @@ func TestREADMEGlobalSetupBackupContract(t *testing.T) {
 	t.Parallel()
 
 	readme := readLower(t, "../README.md")
-	for _, want := range []string{"make install", "bindir", "billar_backup_dir", "billar setup", "billar doctor", "billar backup create", "billar backup list", "billar backup restore", "--dry-run", "--confirm", "--force", "exit code", "safety snapshot", "concurrent_processes", "sensitive", "unencrypted"} {
+	for _, want := range []string{"make install", "bindir", "billar_backup_dir", "billar setup", "billar doctor", "billar health", "billar invoice import --file", "billar invoice pdf", "billar backup create", "billar backup list", "billar backup restore", "time-entry", "agreement update-rate", "--customer-id", "--dry-run", "--confirm", "--force", "exit code", "safety snapshot", "concurrent_processes", "sensitive", "unencrypted"} {
 		if !strings.Contains(readme, want) {
 			t.Fatalf("README missing %q", want)
 		}
@@ -24,23 +24,50 @@ func TestREADMEGlobalSetupBackupContract(t *testing.T) {
 	if !strings.Contains(readme, ".env") || !strings.Contains(readme, "current working directory") {
 		t.Fatalf("README must document cwd-only .env behavior")
 	}
-	for _, forbidden := range []string{"restore is intentionally deferred", "not available/not implemented"} {
+	for _, forbidden := range []string{"restore is intentionally deferred", "restore is deferred", "not available", "not implemented"} {
 		if strings.Contains(readme, forbidden) {
 			t.Fatalf("README still contains obsolete restore wording %q", forbidden)
 		}
 	}
 }
 
-func TestTechnicalBlueprintGlobalSetupBackupContract(t *testing.T) {
+func TestTechnicalBlueprintArchitectureContract(t *testing.T) {
 	t.Parallel()
 
 	blueprint := readLower(t, "technical_blueprint.md")
-	for _, want := range []string{"make install", "bindir", "billar setup", "billar doctor", "billar backup create", "billar backup list", ".db", ".db.json", "sensitive", "unencrypted", "restore", "deferred"} {
+	for _, want := range []string{"cli", "billar health", "billar doctor", "billar invoice import --file", "billar invoice pdf", "internal/core", "internal/app", "internal/connectors/cli", "internal/infra", "storage", "auth", "rendering", "restore implemented", "docs/operations.md", "docs/invoices.md"} {
 		if !strings.Contains(blueprint, want) {
 			t.Fatalf("technical blueprint missing %q", want)
 		}
 	}
 	requireNoBackupSQLiteArtifact(t, "technical blueprint", blueprint)
+	for _, forbidden := range []string{"restore is intentionally deferred", "restore is deferred", "not available", "not implemented"} {
+		if strings.Contains(blueprint, forbidden) {
+			t.Fatalf("technical blueprint still contains obsolete wording %q", forbidden)
+		}
+	}
+}
+
+func TestOperationsRunbookContract(t *testing.T) {
+	t.Parallel()
+
+	operations := readLower(t, "operations.md")
+	for _, want := range []string{"billar setup", "billar doctor", "billar backup restore", "billar_db_path", "billar_export_dir", "billar_backup_dir", "--dry-run", "--confirm", "--force", "exit code", "safety snapshot", "concurrent_processes", "sensitive", "unencrypted"} {
+		if !strings.Contains(operations, want) {
+			t.Fatalf("operations doc missing %q", want)
+		}
+	}
+}
+
+func TestEnvExampleContract(t *testing.T) {
+	t.Parallel()
+
+	envExample := readLower(t, "../.env.example")
+	for _, want := range []string{"optional override", "cwd-only `.env`", "existing non-empty environment variables win", "billar setup", "does not write `.env`", "billar_db_path", "billar_export_dir", "billar_backup_dir", "<db-parent>/exports", "<db-parent>/backups"} {
+		if !strings.Contains(envExample, want) {
+			t.Fatalf(".env.example missing %q", want)
+		}
+	}
 }
 
 func readLower(t *testing.T, path string) string {
