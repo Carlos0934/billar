@@ -299,11 +299,12 @@ func TestInvoicePDFCommandWritesConfirmationFormats(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	outPath := filepath.Join(dir, "inv_001.pdf")
+	want := app.RenderedFileDTO{InvoiceID: "inv_001", Filename: "inv_001.pdf", Path: outPath, MimeType: "application/pdf", SizeBytes: 9}
 	formats := []string{"text", "json", "toon"}
 	for _, format := range formats {
 		format := format
 		t.Run(format, func(t *testing.T) {
-			svc := &stubInvoiceService{pdfRes: app.RenderedFileDTO{InvoiceID: "inv_001", Filename: "inv_001.pdf", Path: outPath, MimeType: "application/pdf", SizeBytes: 9}}
+			svc := &stubInvoiceService{pdfRes: want}
 			var out bytes.Buffer
 			cmd := newTestInvoiceCommand(svc)
 			err := cmd.Run(context.Background(), []string{"invoice", "pdf", "inv_001", "--out", outPath, "--format", format}, &out)
@@ -313,16 +314,35 @@ func TestInvoicePDFCommandWritesConfirmationFormats(t *testing.T) {
 			if svc.pdfArg == nil || svc.pdfArg.InvoiceID != "inv_001" || svc.pdfArg.OutputPath != outPath {
 				t.Fatalf("pdf arg = %+v", svc.pdfArg)
 			}
-			if !strings.Contains(out.String(), "inv_001.pdf") || !strings.Contains(out.String(), "application/pdf") {
-				t.Fatalf("output = %q, want metadata", out.String())
+			got := out.String()
+			for _, required := range []string{"inv_001", "inv_001.pdf", outPath, "application/pdf", "9"} {
+				if !strings.Contains(got, required) {
+					t.Fatalf("%s output = %q, want invoice PDF metadata value %q", format, got, required)
+				}
 			}
-			if format == "json" {
+			for _, forbidden := range []string{"quote_id", "QUOTE PROPOSAL", "proposal"} {
+				if strings.Contains(got, forbidden) {
+					t.Fatalf("%s output = %q, must preserve invoice vocabulary and not contain %q", format, got, forbidden)
+				}
+			}
+			switch format {
+			case "text":
+				if !strings.Contains(got, "Invoice PDF Exported") {
+					t.Fatalf("text output = %q, want invoice-specific confirmation", got)
+				}
+			case "json":
 				var dto app.RenderedFileDTO
 				if err := json.Unmarshal(out.Bytes(), &dto); err != nil {
 					t.Fatalf("json output invalid: %v", err)
 				}
-				if dto.SizeBytes != 9 || dto.Path != outPath {
-					t.Fatalf("json dto = %+v", dto)
+				if dto != want {
+					t.Fatalf("json dto = %+v, want unchanged RenderedFileDTO %+v", dto, want)
+				}
+			case "toon":
+				for _, field := range []string{"invoice_id", "filename", "path", "mime_type", "size_bytes"} {
+					if !strings.Contains(got, field) {
+						t.Fatalf("toon output = %q, want RenderedFileDTO field %q", got, field)
+					}
 				}
 			}
 		})

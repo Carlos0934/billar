@@ -53,9 +53,12 @@ billar invoice update-metadata --id inv_123 --invoice-date 2026-05-01 --due-date
 ## Render PDFs
 
 ```bash
+billar quote pdf quo_123 --out ./exports/quote-proposal.pdf --format json
 billar invoice pdf inv_123 --out ./exports/invoice.pdf --format json
 billar invoice pdf inv_123 --format text
 ```
+
+Use `quote pdf` to export a proposal document from an existing quote. It requires `--out <path>` and returns the same file metadata fields as invoice PDF export in `text`, `json`, or `toon` formats, while the document keeps quote/proposal vocabulary.
 
 When `--out` is omitted, `BILLAR_EXPORT_DIR` is the export root for the default invoice filename. If `BILLAR_EXPORT_DIR` is unset, pass `--out <path>` explicitly. When unset in config, `BILLAR_EXPORT_DIR` defaults under the DB parent directory; `.env.example` shows the optional override.
 
