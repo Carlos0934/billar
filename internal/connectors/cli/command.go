@@ -37,6 +37,7 @@ type Command struct {
 	agreement    AgreementServiceProvider
 	timeEntry    TimeEntryServiceProvider
 	invoice      InvoiceServiceProvider
+	quote        QuoteServiceProvider
 	doctor       DoctorStatusProvider
 	setup        SetupServiceProvider
 	backup       BackupServiceProvider
@@ -45,7 +46,7 @@ type Command struct {
 	stdin        io.Reader
 }
 
-const commandUsage = "usage: billar <health|status|doctor|setup|backup <create|list|restore>|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>|agreement <create|get|list|update-rate|activate|deactivate>|time-entry <record|get|update|delete|list|list-unbilled>|invoice <draft|issue|discard|show|list|inspect|update-metadata|pdf|line>> [flags]"
+const commandUsage = "usage: billar <health|status|doctor|setup|backup <create|list|restore>|legal-entity <list|create|get|update|delete>|issuer <create|get|update>|customer <list|create|get|update|delete>|agreement <create|get|list|update-rate|activate|deactivate>|time-entry <record|get|update|delete|list|list-unbilled>|invoice <draft|issue|discard|show|list|inspect|update-metadata|pdf|line>|quote <create|list|show|add-line|send|accept|reject|expire|delete>> [flags]"
 
 func NewCommand(health HealthStatusProvider, legalEntity LegalEntityServiceProvider, issuer IssuerProfileServiceProvider, customer CustomerProfileServiceProvider, agreement AgreementServiceProvider, timeEntry TimeEntryServiceProvider, invoice InvoiceServiceProvider, colorEnabled bool, optional ...DoctorStatusProvider) Command {
 	var doctor DoctorStatusProvider
@@ -78,6 +79,11 @@ func (c Command) WithSetupService(setup SetupServiceProvider) Command {
 
 func (c Command) WithBackupService(backup BackupServiceProvider) Command {
 	c.backup = backup
+	return c
+}
+
+func (c Command) WithQuoteService(quote QuoteServiceProvider) Command {
+	c.quote = quote
 	return c
 }
 
@@ -146,6 +152,9 @@ func (c Command) Run(ctx context.Context, args []string, out io.Writer) error {
 
 	case "invoice":
 		return c.runInvoice(ctx, args[1:], out)
+
+	case "quote":
+		return c.runQuote(ctx, args[1:], out)
 
 	default:
 		return fmt.Errorf("unknown command %q", args[0])

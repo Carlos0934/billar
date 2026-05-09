@@ -22,6 +22,7 @@ func newCommand(cfg config.Config, store *infrasqlite.Store) connectorcli.Comman
 	agreementStore := infrasqlite.NewServiceAgreementStore(store)
 	timeEntryStore := infrasqlite.NewTimeEntryStore(store)
 	invoiceStore := infrasqlite.NewInvoiceStore(store)
+	quoteStore := infrasqlite.NewQuoteStore(store)
 	invoiceSequenceStore := infrasqlite.NewInvoiceSequenceStore(store)
 	invoiceService := app.NewInvoiceService(invoiceStore, timeEntryStore, agreementStore, customerProfileStore, invoiceSequenceStore, issuerProfileStore, legalEntityStore)
 	invoicePDFService := app.NewInvoicePDFService(invoiceStore, timeEntryStore, customerProfileStore, issuerProfileStore, legalEntityStore, pdf.Renderer{}, exportfs.FlexibleWriter{Root: cfg.ExportDir})
@@ -30,6 +31,8 @@ func newCommand(cfg config.Config, store *infrasqlite.Store) connectorcli.Comman
 	doctorService := app.NewDoctorService(invoiceStore, app.DoctorConfig{Project: cfg.AppName, DBPath: cfg.DBPath, DBPathSource: cfg.DBPathSource, ExportDir: cfg.ExportDir, ExportDirSource: cfg.ExportDirSource, BackupDir: cfg.BackupDir, BackupDirSource: cfg.BackupDirSource, PDFAvailable: true})
 	setupService := app.NewSetupService(cfg.AppName, runtimePaths)
 	backupService := newBackupService(runtimePaths)
+
+	quoteService := app.NewQuoteService(quoteStore, customerProfileStore, agreementStore)
 
 	return connectorcli.NewCommand(
 		app.NewHealthService(cfg.AppName),
@@ -41,7 +44,7 @@ func newCommand(cfg config.Config, store *infrasqlite.Store) connectorcli.Comman
 		invoiceProvider,
 		cfg.ColorEnabled,
 		doctorService,
-	).WithExportDir(cfg.ExportDir).WithSetupService(setupService).WithBackupService(backupService)
+	).WithExportDir(cfg.ExportDir).WithSetupService(setupService).WithBackupService(backupService).WithQuoteService(quoteService)
 }
 
 func newPreStoreCommand(cfg config.Config) connectorcli.Command {

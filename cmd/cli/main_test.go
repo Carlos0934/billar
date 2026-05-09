@@ -276,6 +276,23 @@ func TestNewCommandWiresInvoiceService(t *testing.T) {
 	}
 }
 
+func TestNewCommandWiresQuoteService(t *testing.T) {
+	t.Parallel()
+
+	store := mustOpenCLIStore(t)
+	seedCLIWiringFixture(t, store.DB())
+	cmd := newCommand(config.Config{AppName: "billar", ColorEnabled: false}, store)
+
+	var out bytes.Buffer
+	err := cmd.Run(context.Background(), []string{"quote", "create", "--customer-id", "cus_cli_wiring", "--currency", "USD", "--format", "json"}, &out)
+	if err != nil {
+		t.Fatalf("quote create Run() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "cus_cli_wiring") || !strings.Contains(out.String(), "draft") {
+		t.Fatalf("quote create output = %q, want quote payload", out.String())
+	}
+}
+
 func TestNewCommandWiresSetupBackupAndDoctorReadiness(t *testing.T) {
 	t.Parallel()
 

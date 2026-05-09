@@ -1,10 +1,25 @@
 # Invoice operations
 
-This guide covers invoice import, inspection, metadata corrections, and PDF export through the Billar CLI.
+This guide covers quote preparation, invoice import, inspection, metadata corrections, and PDF export through the Billar CLI.
 
 ## CLI-first policy
 
 Routine billing operations must use the CLI and shared application services. Direct SQLite edits are emergency repair-only and require explicit operator approval before touching the database.
+
+## Prepare quotes
+
+Quotes are commercial offers, not invoices. They use their own lifecycle (`draft`, `sent`, `accepted`, `rejected`, `expired`) and only accepted quotes are eligible for a future quote-to-invoice conversion flow.
+
+```bash
+billar quote create --customer-id cus_123 --currency USD --notes "Project scope"
+billar quote add-line quo_123 --agreement-id agr_123 --description "Implementation" --minutes 240
+billar quote send --id quo_123
+billar quote accept --id quo_123
+billar quote list --customer-id cus_123 --status accepted
+billar quote show --id quo_123 --format json
+```
+
+Use `quote reject`, `quote expire`, or `quote delete` for quotes that should not proceed. Accepted quotes cannot be deleted.
 
 ## Import issued invoices
 
