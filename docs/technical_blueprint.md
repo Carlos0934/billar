@@ -12,6 +12,7 @@ Billar manages:
 - customer profiles
 - customer-specific service agreements
 - billable time entries
+- quote preparation and lifecycle management before invoicing
 - invoice drafting, issuing, importing, inspection, metadata corrections, and PDF rendering
 - local SQLite backup and restore; restore implemented through the CLI backup service
 
@@ -30,15 +31,15 @@ The system intentionally remains single-operator and local-first. It avoids dist
 
 ### `internal/core`
 
-`internal/core` contains domain types and business rules. It models legal entities, customers, issuers, service agreements, time entries, invoices, money, hours, currencies, and validation. Core code must not know about SQLite, CLI flags, filesystems, config loading, logging, or PDF generation.
+`internal/core` contains domain types and business rules. It models legal entities, customers, issuers, service agreements, time entries, quotes, invoices, money, hours, currencies, and validation. Core code must not know about SQLite, CLI flags, filesystems, config loading, logging, or PDF generation.
 
 ### `internal/app`
 
-`internal/app` exposes application services and DTOs. It coordinates use cases such as customer creation, agreement changes, time entry recording, invoice drafting/issuing/importing, metadata updates, PDF rendering requests, setup checks, and backup/restore orchestration. Application services consume storage/rendering/export seams rather than concrete infrastructure.
+`internal/app` exposes application services and DTOs. It coordinates use cases such as customer creation, agreement changes, time entry recording, quote lifecycle actions, invoice drafting/issuing/importing, metadata updates, PDF rendering requests, setup checks, and backup/restore orchestration. Application services consume storage/rendering/export seams rather than concrete infrastructure.
 
 ### `internal/connectors/cli`
 
-`internal/connectors/cli` is the sole operator connector. It parses commands, validates transport-level flags, calls `internal/app` services, and writes `text`, `json`, or `toon` output from canonical DTOs. Representative command forms include `billar health`, `billar doctor`, `billar invoice import --file`, and `billar invoice pdf`.
+`internal/connectors/cli` is the sole operator connector. It parses commands, validates transport-level flags, calls `internal/app` services, and writes `text`, `json`, or `toon` output from canonical DTOs. Representative command forms include `billar health`, `billar doctor`, `billar quote create`, `billar invoice import --file`, and `billar invoice pdf`.
 
 ### `internal/infra`
 
@@ -48,7 +49,7 @@ The system intentionally remains single-operator and local-first. It avoids dist
 
 ### Storage boundary
 
-SQLite access belongs in `internal/infra`. CLI code must not bypass `internal/app` to mutate core state, and `internal/core` must never issue SQL. Invoice totals come from invoice lines persisted through application services.
+SQLite access belongs in `internal/infra`. CLI code must not bypass `internal/app` to mutate core state, and `internal/core` must never issue SQL. Quote totals come from quote lines, and invoice totals come from invoice lines persisted through application services.
 
 ### Access/auth boundary
 
@@ -68,6 +69,7 @@ PDF rendering is an infrastructure implementation behind app-level requests. Ren
 - Money and durations are integer-backed billing values.
 - Hourly billing is the first-class billing mode.
 - Customer profiles may have one or more service agreements.
+- Quotes are separate commercial records; quote-to-invoice conversion is explicit future work, not an invoice status.
 - Issued invoices must remain reproducible.
 - Normal billing operations are CLI/app-service first; direct SQLite edits are emergency repair-only and require explicit operator approval.
 - Backups are local SQLite snapshots with metadata sidecars and are sensitive, unencrypted artifacts.
