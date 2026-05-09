@@ -30,7 +30,7 @@ var baselineTableNames = []string{
 	"invoice_lines",
 }
 
-var RequiredBillarTables = append([]string(nil), baselineTableNames...)
+var RequiredBillarTables = append(append([]string(nil), baselineTableNames...), "quotes", "quote_lines")
 
 type migration struct {
 	version int

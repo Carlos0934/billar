@@ -21,8 +21,8 @@ func TestLatestMigrationVersionReturnsMaxEmbeddedMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LatestMigrationVersion() error = %v", err)
 	}
-	if got != 4 {
-		t.Fatalf("LatestMigrationVersion() = %d, want max embedded migration 4", got)
+	if got != 5 {
+		t.Fatalf("LatestMigrationVersion() = %d, want max embedded migration 5", got)
 	}
 }
 
@@ -38,12 +38,57 @@ func TestRequiredBillarTablesExportsBaselineTableNames(t *testing.T) {
 		"invoices",
 		"issuer_profiles",
 		"legal_entities",
+		"quote_lines",
+		"quotes",
 		"service_agreements",
 		"time_entries",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("RequiredBillarTables = %v, want %v", RequiredBillarTables, want)
 	}
+}
+
+func TestApplyMigrations_AddsQuoteWorkflowTables(t *testing.T) {
+	t.Parallel()
+
+	db, cleanup := newTempDB(t)
+	t.Cleanup(cleanup)
+
+	if err := applyMigrations(db, migrationsFS); err != nil {
+		t.Fatalf("applyMigrations() error = %v", err)
+	}
+
+	version, name, appliedAt := migrationRow(t, db, 5)
+	if version != 5 || name != "0005_quote_workflow" || appliedAt <= 0 {
+		t.Fatalf("schema_migrations row = (%d, %q, %d), want (5, 0005_quote_workflow, >0)", version, name, appliedAt)
+	}
+	assertTableExists(t, db, "quotes")
+	assertTableExists(t, db, "quote_lines")
+	assertColumns(t, quoteColumnInfo(t, db, "quotes"), map[string]sqliteColumnInfo{
+		"id":          {typ: "TEXT", notNull: true},
+		"customer_id": {typ: "TEXT", notNull: true},
+		"status":      {typ: "TEXT", notNull: true},
+		"currency":    {typ: "TEXT", notNull: true},
+		"notes":       {typ: "TEXT", notNull: true, defaultValue: "''"},
+		"sent_at":     {typ: "INTEGER"},
+		"accepted_at": {typ: "INTEGER"},
+		"rejected_at": {typ: "INTEGER"},
+		"expired_at":  {typ: "INTEGER"},
+		"created_at":  {typ: "INTEGER", notNull: true},
+		"updated_at":  {typ: "INTEGER", notNull: true},
+	})
+	assertColumns(t, quoteColumnInfo(t, db, "quote_lines"), map[string]sqliteColumnInfo{
+		"id":                   {typ: "TEXT", notNull: true},
+		"quote_id":             {typ: "TEXT", notNull: true},
+		"service_agreement_id": {typ: "TEXT", notNull: true},
+		"description":          {typ: "TEXT", notNull: true},
+		"quantity_min":         {typ: "INTEGER", notNull: true},
+		"unit_rate_amount":     {typ: "INTEGER", notNull: true},
+		"unit_rate_currency":   {typ: "TEXT", notNull: true},
+		"created_at":           {typ: "INTEGER", notNull: true},
+	})
+	assertIndexExists(t, db, "idx_quotes_customer_status")
+	assertIndexExists(t, db, "idx_quote_lines_quote_id")
 }
 
 func newTempDB(t *testing.T) (*sql.DB, func()) {
@@ -365,8 +410,8 @@ func TestApplyMigrations_IdempotentReopen(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatalf("count schema_migrations: %v", err)
 	}
-	if count != 4 {
-		t.Fatalf("schema_migrations row count = %d, want 4", count)
+	if count != 5 {
+		t.Fatalf("schema_migrations row count = %d, want 5", count)
 	}
 	_, _, secondAppliedAt := migrationRow(t, db, 1)
 	if secondAppliedAt != firstAppliedAt {
@@ -555,6 +600,56 @@ func invoiceLineColumnInfo(t *testing.T, db *sql.DB) map[string]sqliteColumnInfo
 		t.Fatalf("iterate invoice line column info: %v", err)
 	}
 	return columns
+}
+
+func quoteColumnInfo(t *testing.T, db *sql.DB, table string) map[string]sqliteColumnInfo {
+	t.Helper()
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(%s): %v", table, err)
+	}
+	defer rows.Close()
+	columns := map[string]sqliteColumnInfo{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("scan %s column info: %v", table, err)
+		}
+		columns[name] = sqliteColumnInfo{typ: typ, notNull: notnull == 1 || pk > 0, defaultValue: dflt.String}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate %s column info: %v", table, err)
+	}
+	return columns
+}
+
+func assertColumns(t *testing.T, got map[string]sqliteColumnInfo, want map[string]sqliteColumnInfo) {
+	t.Helper()
+	for name, wantInfo := range want {
+		gotInfo, ok := got[name]
+		if !ok {
+			t.Fatalf("column %q missing from %v", name, got)
+		}
+		if gotInfo != wantInfo {
+			t.Fatalf("column %q = %+v, want %+v", name, gotInfo, wantInfo)
+		}
+	}
+}
+
+func assertIndexExists(t *testing.T, db *sql.DB, index string) {
+	t.Helper()
+	var name string
+	err := db.QueryRowContext(context.Background(), `SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`, index).Scan(&name)
+	if err != nil {
+		t.Fatalf("index %q missing: %v", index, err)
+	}
+	if name != index {
+		t.Fatalf("index name = %q, want %q", name, index)
+	}
 }
 
 func seedLegacyInvoiceLineForSnapshotMigration(t *testing.T, db *sql.DB) {
